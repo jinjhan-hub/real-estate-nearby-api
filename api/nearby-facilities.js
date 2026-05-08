@@ -115,7 +115,7 @@ export default async function handler(req, res) {
   method: "POST",
   headers: {
     "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": "real-estate-nearby-api/1.0 (contact: your@email.com)"
+    "User-Agent": "real-estate-nearby-api/1.0 (contact: jinhan@example.com)"
   },
           body: new URLSearchParams({
             data: query
