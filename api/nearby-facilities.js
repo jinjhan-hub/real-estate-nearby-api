@@ -47,33 +47,33 @@ export default async function handler(req, res) {
 
     // 1. 地址轉經緯度：先用免費 OSM Nominatim
     const geoUrl =
-      "https://nominatim.openstreetmap.org/search?" +
-      new URLSearchParams({
-        q: address,
-        format: "json",
-        limit: "1",
-        countrycodes: "tw",
-        addressdetails: "1"
-      });
+  "https://api.nlsc.gov.tw/other/TownVillagePointQuery/" +
+  encodeURIComponent(address);
 
-    const geoResponse = await fetch(geoUrl, {
-      headers: {
-        "User-Agent": "real-estate-nearby-api/1.0"
-      }
-    });
+const geoResponse = await fetch(geoUrl);
 
-    const geoData = await geoResponse.json();
+const geoText = await geoResponse.text();
 
-    if (!geoData || geoData.length === 0) {
-      return res.status(404).json({
-        error: "找不到地址座標",
-        message: "請確認地址是否完整，例如：彰化縣員林市莒光路364號"
-      });
-    }
+if (!geoText || geoText.includes("查無資料")) {
+  return res.status(404).json({
+    error: "找不到地址座標"
+  });
+}
 
-    const lat = Number(geoData[0].lat);
-    const lon = Number(geoData[0].lon);
+// NLSC 回傳 CSV 格式
+const rows = geoText.trim().split("\n");
 
+if (rows.length < 2) {
+  return res.status(404).json({
+    error: "找不到地址座標"
+  });
+}
+
+const columns = rows[1].split(",");
+
+// 經緯度位置
+const lon = Number(columns[4]);
+const lat = Number(columns[5]);
     // 2. 查 500 公尺內生活機能：Overpass API
     const query = `
       [out:json][timeout:25];
