@@ -1,5 +1,6 @@
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
+
   const toRad = (value) => (value * Math.PI) / 180;
 
   const dLat = toRad(lat2 - lat1);
@@ -17,64 +18,77 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 function classifyFacility(tags = {}) {
   if (tags.amenity === "school") return "學校";
   if (tags.amenity === "kindergarten") return "幼兒園";
+
   if (tags.shop === "convenience") return "便利商店";
   if (tags.shop === "supermarket") return "超市";
+
   if (tags.amenity === "marketplace") return "市場";
+
   if (tags.leisure === "park") return "公園";
+
   if (tags.amenity === "hospital") return "醫院";
   if (tags.amenity === "clinic") return "診所";
   if (tags.amenity === "pharmacy") return "藥局";
+
   if (tags.amenity === "bank") return "銀行";
   if (tags.amenity === "post_office") return "郵局";
+
   if (tags.amenity === "parking") return "停車場";
+
   if (tags.railway === "station") return "車站";
+
   if (tags.highway === "bus_stop") return "公車站";
+
   if (tags.amenity === "restaurant") return "餐飲";
+
   return "其他";
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST method is allowed" });
+    return res.status(405).json({
+      error: "Only POST method is allowed"
+    });
   }
 
   try {
     const { address, radius = 500 } = req.body || {};
 
     if (!address) {
-      return res.status(400).json({ error: "address is required" });
+      return res.status(400).json({
+        error: "address is required"
+      });
     }
 
-    // 1. 地址轉經緯度：先用免費 OSM Nominatim
+    // 地址轉經緯度
     const geoUrl =
-  "https://api.nlsc.gov.tw/other/TownVillagePointQuery/" +
-  encodeURIComponent(address);
+      "https://nominatim.openstreetmap.org/search?" +
+      new URLSearchParams({
+        q: address,
+        format: "json",
+        limit: "1",
+        countrycodes: "tw",
+        addressdetails: "1"
+      });
 
-const geoResponse = await fetch(geoUrl);
+    const geoResponse = await fetch(geoUrl, {
+      headers: {
+        "User-Agent": "real-estate-nearby-api/1.0"
+      }
+    });
 
-const geoText = await geoResponse.text();
+    const geoData = await geoResponse.json();
 
-if (!geoText || geoText.includes("查無資料")) {
-  return res.status(404).json({
-    error: "找不到地址座標"
-  });
-}
+    if (!geoData || geoData.length === 0) {
+      return res.status(404).json({
+        error: "找不到地址座標"
+      });
+    }
 
-// NLSC 回傳 CSV 格式
-const rows = geoText.trim().split("\n");
+    const lat = Number(geoData[0].lat);
+    const lon = Number(geoData[0].lon);
 
-if (rows.length < 2) {
-  return res.status(404).json({
-    error: "找不到地址座標"
-  });
-}
-
-const columns = rows[1].split(",");
-
-// 經緯度位置
-const lon = Number(columns[4]);
-const lat = Number(columns[5]);
-    // 2. 查 500 公尺內生活機能：Overpass API
+    // 查周邊設施
     const query = `
       [out:json][timeout:25];
       (
@@ -87,13 +101,18 @@ const lat = Number(columns[5]);
       out center tags;
     `;
 
-    const overpassResponse = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({ data: query })
-    });
+    const overpassResponse = await fetch(
+      "https://overpass-api.de/api/interpreter",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          data: query
+        })
+      }
+    );
 
     const overpassData = await overpassResponse.json();
 
@@ -107,7 +126,12 @@ const lat = Number(columns[5]);
 
         if (!name) return null;
 
-        const distance_m = haversineDistance(lat, lon, item.lat, item.lon);
+        const distance_m = haversineDistance(
+          lat,
+          lon,
+          item.lat,
+          item.lon
+        );
 
         return {
           name,
@@ -123,14 +147,14 @@ const lat = Number(columns[5]);
 
     return res.status(200).json({
       input_address: address,
-      matched_address: geoData[0].display_name,
       radius,
       location: {
         lat,
         lon
       },
       facilities,
-      note: "資料來源為 OpenStreetMap / Overpass，實際設施仍建議以現場與官方資料確認。"
+      note:
+        "資料來源為 OpenStreetMap / Overpass，實際設施仍建議以現場與官方資料確認。"
     });
   } catch (error) {
     return res.status(500).json({
