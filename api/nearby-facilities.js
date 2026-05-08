@@ -111,11 +111,12 @@ export default async function handler(req, res) {
 
     for (const endpoint of overpassEndpoints) {
       try {
-        overpassData = await fetchJson(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
+       overpassData = await fetchJson(endpoint, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": "real-estate-nearby-api/1.0 (contact: your@email.com)"
+  },
           body: new URLSearchParams({
             data: query
           })
