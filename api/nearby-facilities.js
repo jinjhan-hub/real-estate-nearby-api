@@ -1,8 +1,6 @@
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
-
   const toRad = (value) => (value * Math.PI) / 180;
-
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
 
@@ -18,30 +16,35 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 function classifyFacility(tags = {}) {
   if (tags.amenity === "school") return "學校";
   if (tags.amenity === "kindergarten") return "幼兒園";
-
   if (tags.shop === "convenience") return "便利商店";
   if (tags.shop === "supermarket") return "超市";
-
   if (tags.amenity === "marketplace") return "市場";
-
   if (tags.leisure === "park") return "公園";
-
   if (tags.amenity === "hospital") return "醫院";
   if (tags.amenity === "clinic") return "診所";
   if (tags.amenity === "pharmacy") return "藥局";
-
   if (tags.amenity === "bank") return "銀行";
   if (tags.amenity === "post_office") return "郵局";
-
   if (tags.amenity === "parking") return "停車場";
-
   if (tags.railway === "station") return "車站";
-
   if (tags.highway === "bus_stop") return "公車站";
-
   if (tags.amenity === "restaurant") return "餐飲";
-
   return "其他";
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  if (text.trim().startsWith("<")) {
+    throw new Error(`API returned HTML instead of JSON: ${text.slice(0, 120)}`);
+  }
+
+  return JSON.parse(text);
 }
 
 export default async function handler(req, res) {
@@ -60,35 +63,32 @@ export default async function handler(req, res) {
       });
     }
 
-    // 地址轉經緯度
     const geoUrl =
       "https://nominatim.openstreetmap.org/search?" +
       new URLSearchParams({
         q: address,
         format: "json",
         limit: "1",
-        countrycodes: "tw",
-        addressdetails: "1"
+        addressdetails: "1",
+        "accept-language": "zh-TW"
       });
 
-    const geoResponse = await fetch(geoUrl, {
+    const geoData = await fetchJson(geoUrl, {
       headers: {
         "User-Agent": "real-estate-nearby-api/1.0"
       }
     });
 
-    const geoData = await geoResponse.json();
-
     if (!geoData || geoData.length === 0) {
       return res.status(404).json({
-        error: "找不到地址座標"
+        error: "找不到地址座標",
+        suggestion: "請改用較短地址，例如：員林車站、員林市莒光路"
       });
     }
 
     const lat = Number(geoData[0].lat);
     const lon = Number(geoData[0].lon);
 
-    // 查周邊設施
     const query = `
       [out:json][timeout:25];
       (
@@ -101,20 +101,37 @@ export default async function handler(req, res) {
       out center tags;
     `;
 
-    const overpassResponse = await fetch(
+    const overpassEndpoints = [
       "https://overpass-api.de/api/interpreter",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: new URLSearchParams({
-          data: query
-        })
-      }
-    );
+      "https://overpass.kumi.systems/api/interpreter"
+    ];
 
-    const overpassData = await overpassResponse.json();
+    let overpassData = null;
+    let lastError = null;
+
+    for (const endpoint of overpassEndpoints) {
+      try {
+        overpassData = await fetchJson(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: new URLSearchParams({
+            data: query
+          })
+        });
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!overpassData) {
+      return res.status(502).json({
+        error: "周邊設施查詢失敗",
+        message: lastError?.message || "Overpass API failed"
+      });
+    }
 
     const facilities = (overpassData.elements || [])
       .map((item) => {
@@ -124,19 +141,12 @@ export default async function handler(req, res) {
           item.tags?.["name:zh-TW"] ||
           "";
 
-        if (!name) return null;
-
-        const distance_m = haversineDistance(
-          lat,
-          lon,
-          item.lat,
-          item.lon
-        );
+        if (!name || !item.lat || !item.lon) return null;
 
         return {
           name,
           category: classifyFacility(item.tags),
-          distance_m,
+          distance_m: haversineDistance(lat, lon, item.lat, item.lon),
           lat: item.lat,
           lon: item.lon
         };
@@ -147,14 +157,14 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       input_address: address,
+      matched_address: geoData[0].display_name,
       radius,
       location: {
         lat,
         lon
       },
       facilities,
-      note:
-        "資料來源為 OpenStreetMap / Overpass，實際設施仍建議以現場與官方資料確認。"
+      note: "資料來源為 OpenStreetMap / Overpass，實際設施仍建議以現場與官方資料確認。"
     });
   } catch (error) {
     return res.status(500).json({
