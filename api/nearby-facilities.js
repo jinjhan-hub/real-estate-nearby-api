@@ -55,7 +55,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { address, radius = 500 } = req.body || {};
+    const { address, lat, lon, radius = 500 } = req.body || {};
 
     if (!address) {
       return res.status(400).json({
@@ -63,47 +63,57 @@ export default async function handler(req, res) {
       });
     }
 
-    const geoUrl =
-      "https://nominatim.openstreetmap.org/search?" +
-      new URLSearchParams({
-        q: address,
-        format: "json",
-        limit: "1",
-        addressdetails: "1",
-        "accept-language": "zh-TW"
+    let finalLat = Number(lat);
+    let finalLon = Number(lon);
+    let matchedAddress = address;
+    let locationSource = "user_provided_coordinates";
+
+    // 如果使用者沒有提供經緯度，才用 OSM 嘗試地址定位
+    if (!finalLat || !finalLon) {
+      const geoUrl =
+        "https://nominatim.openstreetmap.org/search?" +
+        new URLSearchParams({
+          q: address,
+          format: "json",
+          limit: "1",
+          addressdetails: "1",
+          "accept-language": "zh-TW"
+        });
+
+      const geoData = await fetchJson(geoUrl, {
+        headers: {
+          "User-Agent": "real-estate-nearby-api/1.0"
+        }
       });
 
-    const geoData = await fetchJson(geoUrl, {
-      headers: {
-        "User-Agent": "real-estate-nearby-api/1.0"
+      if (!geoData || geoData.length === 0) {
+        return res.status(404).json({
+          error: "找不到地址座標",
+          suggestion: "請提供 Google Maps 複製的經緯度，例如：23.9594522, 120.569628"
+        });
       }
-    });
 
-    if (!geoData || geoData.length === 0) {
-      return res.status(404).json({
-        error: "找不到地址座標",
-        suggestion: "請改用較短地址，例如：員林車站、員林市莒光路"
-      });
+      finalLat = Number(geoData[0].lat);
+      finalLon = Number(geoData[0].lon);
+      matchedAddress = geoData[0].display_name;
+      locationSource = "osm_geocoding";
     }
-
-    const lat = Number(geoData[0].lat);
-    const lon = Number(geoData[0].lon);
 
     const query = `
       [out:json][timeout:25];
       (
-        node["amenity"~"school|kindergarten|hospital|clinic|pharmacy|bank|post_office|parking|restaurant|marketplace"](around:${radius},${lat},${lon});
-        node["shop"~"convenience|supermarket"](around:${radius},${lat},${lon});
-        node["leisure"="park"](around:${radius},${lat},${lon});
-        node["railway"="station"](around:${radius},${lat},${lon});
-        node["highway"="bus_stop"](around:${radius},${lat},${lon});
+        node["amenity"~"school|kindergarten|hospital|clinic|pharmacy|bank|post_office|parking|restaurant|marketplace"](around:${radius},${finalLat},${finalLon});
+        node["shop"~"convenience|supermarket"](around:${radius},${finalLat},${finalLon});
+        node["leisure"="park"](around:${radius},${finalLat},${finalLon});
+        node["railway"="station"](around:${radius},${finalLat},${finalLon});
+        node["highway"="bus_stop"](around:${radius},${finalLat},${finalLon});
       );
       out center tags;
     `;
 
     const overpassEndpoints = [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter"
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass-api.de/api/interpreter"
     ];
 
     let overpassData = null;
@@ -111,12 +121,12 @@ export default async function handler(req, res) {
 
     for (const endpoint of overpassEndpoints) {
       try {
-       overpassData = await fetchJson(endpoint, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": "real-estate-nearby-api/1.0 (contact: jinhan@example.com)"
-  },
+        overpassData = await fetchJson(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "real-estate-nearby-api/1.0 (contact: your@email.com)"
+          },
           body: new URLSearchParams({
             data: query
           })
@@ -147,7 +157,7 @@ export default async function handler(req, res) {
         return {
           name,
           category: classifyFacility(item.tags),
-          distance_m: haversineDistance(lat, lon, item.lat, item.lon),
+          distance_m: haversineDistance(finalLat, finalLon, item.lat, item.lon),
           lat: item.lat,
           lon: item.lon
         };
@@ -158,14 +168,15 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       input_address: address,
-      matched_address: geoData[0].display_name,
+      matched_address: matchedAddress,
       radius,
+      location_source: locationSource,
       location: {
-        lat,
-        lon
+        lat: finalLat,
+        lon: finalLon
       },
       facilities,
-      note: "資料來源為 OpenStreetMap / Overpass，實際設施仍建議以現場與官方資料確認。"
+      note: "座標可由 Google Maps 複製；周邊設施資料來源為 OpenStreetMap / Overpass，實際資訊請以現場與官方資料確認。"
     });
   } catch (error) {
     return res.status(500).json({
