@@ -83,7 +83,21 @@ const MODULE_MAP = {
     "09_workflows/07_FINAL_CONFIRMATION_WORKFLOW.txt"
   ]
 },
-
+  
+state_machine: {
+  type: "folder",
+  files: [
+    "10_state_machine/01_STATE_OVERVIEW.txt",
+    "10_state_machine/02_PROPERTY_STATE.txt",
+    "10_state_machine/03_PLATFORM_STATE.txt",
+    "10_state_machine/04_STYLE_STATE.txt",
+    "10_state_machine/05_IMAGE_STATE.txt",
+    "10_state_machine/06_COPY_STATE.txt",
+    "10_state_machine/07_FINAL_REVIEW_STATE.txt",
+    "10_state_machine/08_ERROR_RECOVERY_STATE.txt"
+  ]
+},
+  
  examples: {
   type: "folder",
   files: [
