@@ -74,7 +74,7 @@ async function fetchTextFile(url) {
 
 export default async function handler(req, res) {
   try {
-    const { module } = req.query;
+   const { module, section } = req.query;
 
     if (!module) {
       return res.status(400).json({
