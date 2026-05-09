@@ -20,7 +20,12 @@ const MODULE_MAP = {
 "02_sales_generator/15_FIRST_BUYER_STYLE.txt",
 "02_sales_generator/16_LUXURY_STYLE.txt",
 "02_sales_generator/17_MINIMAL_STYLE.txt",
-
+"02_sales_generator/18_FB_HOOK_LIBRARY.txt",
+"02_sales_generator/19_IG_HOOK_LIBRARY.txt",
+"02_sales_generator/20_THREADS_HOOK_LIBRARY.txt",
+"02_sales_generator/21_OBSERVATION_LIBRARY.txt",
+"02_sales_generator/22_EMOTIONAL_TRANSITION_LIBRARY.txt",
+    
     // 舊版保留（過渡期）
     "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
   ]
