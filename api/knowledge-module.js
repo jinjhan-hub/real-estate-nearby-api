@@ -9,9 +9,14 @@ const MODULE_MAP = {
   },
 
   nearby_facilities: {
-    type: "single",
-    file: "03_NEARBY_FACILITIES_MASTER.txt"
-  },
+  type: "folder",
+  files: [
+    "03_nearby_facilities/00_MODULE_OVERVIEW.txt",
+    "03_nearby_facilities/01_COORDINATE_POLICY.txt",
+    "03_nearby_facilities/02_FACILITY_CATEGORY_RULES.txt",
+    "03_nearby_facilities/03_NEARBY_OUTPUT_TEMPLATE.txt"
+  ]
+},
 
   floorplan_converter: {
     type: "single",
