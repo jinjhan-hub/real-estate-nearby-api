@@ -9,7 +9,7 @@ const MODULE_MAP = {
 };
 
 const GITHUB_RAW_BASE =
-  "https://raw.githubusercontent.com/jinjhan-hub/real-estate-gpt-knowledge/main";
+  "https://raw.githubusercontent.com/jinjhan-hub/real-estate-gpt-knowledge/main/merged_upload_files";
 
 export default async function handler(req, res) {
   try {
