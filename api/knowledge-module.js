@@ -19,9 +19,14 @@ const MODULE_MAP = {
 },
 
   floorplan_converter: {
-    type: "single",
-    file: "04_FLOORPLAN_CONVERTER_MASTER.txt"
-  },
+  type: "folder",
+  files: [
+    "04_floorplan_converter/00_MODULE_OVERVIEW.txt",
+    "04_floorplan_converter/01_RECOGNITION_CONFIRMATION_RULES.txt",
+    "04_floorplan_converter/02_GEOMETRY_LOCK_RULES.txt",
+    "04_floorplan_converter/03_FLOORPLAN_STYLE_LIBRARY.txt"
+  ]
+},
 
   market_content: {
     type: "single",
