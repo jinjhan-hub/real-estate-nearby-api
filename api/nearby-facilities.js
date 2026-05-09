@@ -295,3 +295,42 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
 
   return R * c;
 }
+
+function buildFacilitySummary(facilities, radius) {
+  if (!facilities || facilities.length === 0) {
+    return `周邊機能｜${radius} 公尺內\n\n指定範圍內未取得符合條件的設施資料。\n\n備註：查詢結果依 OpenStreetMap / Overpass API 資料回傳，若資料不足，請以 Google Maps 或實地查證為準。`;
+  }
+
+  const categoryLabels = {
+    transport: "交通機能",
+    shopping: "採買機能",
+    school: "學校機能",
+    park: "公園綠地",
+    medical: "醫療機能",
+    other: "其他機能"
+  };
+
+  const grouped = {};
+
+  for (const item of facilities) {
+    const category = item.category || "other";
+    if (!grouped[category]) grouped[category] = [];
+    grouped[category].push(item);
+  }
+
+  const lines = [`周邊機能｜${radius} 公尺內`, ""];
+
+  for (const [category, items] of Object.entries(grouped)) {
+    lines.push(categoryLabels[category] || category);
+
+    for (const item of items) {
+      lines.push(`・${item.name}｜約 ${item.distance_meters} 公尺`);
+    }
+
+    lines.push("");
+  }
+
+  lines.push("備註：距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。");
+
+  return lines.join("\n");
+}
