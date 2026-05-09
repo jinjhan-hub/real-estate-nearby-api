@@ -94,7 +94,7 @@ out center;
     let lastOverpassError = null;
 
     const overpassEndpoints = [
-      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter",
       "https://overpass-api.de/api/interpreter"
     ];
 
@@ -103,15 +103,17 @@ out center;
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       try {
-       const url = `${endpoint}?data=${encodeURIComponent(overpassQuery)}`;
-
-const response = await fetch(url, {
-  method: "GET",
-  headers: {
-    "Accept": "application/json"
-  },
-  signal: controller.signal
-});
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Accept": "*/*",
+            "User-Agent": "real-estate-nearby-api/1.0 (https://jinjhan-hub.github.io/real-estate-gpt-knowledge/privacy-policy.html)",
+            "Referer": "https://jinjhan-hub.github.io/real-estate-gpt-knowledge/privacy-policy.html"
+          },
+          body: "data=" + encodeURIComponent(overpassQuery),
+          signal: controller.signal
+        });
 
         clearTimeout(timeoutId);
 
