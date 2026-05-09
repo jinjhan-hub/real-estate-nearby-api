@@ -93,6 +93,37 @@ export default async function handler(req, res) {
         allowedModules: Object.keys(MODULE_MAP)
       });
     }
+    // section mode：只讀指定單一 section
+if (moduleConfig.type === "folder" && section) {
+  const filePath = moduleConfig.files.find((file) =>
+    file.includes(`/${section}.txt`)
+  );
+
+  if (!filePath) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid section",
+      module,
+      section,
+      allowedSections: moduleConfig.files.map((file) =>
+        file.split("/").pop().replace(".txt", "")
+      )
+    });
+  }
+
+  const url = `${GITHUB_ROOT_BASE}/${filePath}`;
+  const content = await fetchTextFile(url);
+
+  return res.status(200).json({
+    ok: true,
+    module,
+    mode: "section",
+    section,
+    filePath,
+    source: url,
+    content
+  });
+}
 
     // 新版：sales_generator 讀 GitHub 資料夾內多個 txt
     if (moduleConfig.type === "folder") {
