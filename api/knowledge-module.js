@@ -15,6 +15,11 @@ const MODULE_MAP = {
     "02_sales_generator/10_THREADS_TEMPLATE.txt",
     "02_sales_generator/11_CTA_LIBRARY.txt",
     "02_sales_generator/12_HASHTAG_RULES.txt",
+    "02_sales_generator/13_INVEST_STYLE.txt",
+"02_sales_generator/14_WARM_HOME_STYLE.txt",
+"02_sales_generator/15_FIRST_BUYER_STYLE.txt",
+"02_sales_generator/16_LUXURY_STYLE.txt",
+"02_sales_generator/17_MINIMAL_STYLE.txt",
 
     // 舊版保留（過渡期）
     "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
