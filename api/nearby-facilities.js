@@ -43,23 +43,28 @@ export default async function handler(req, res) {
       school: `
         node["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
         way["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
+        relation["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
       `,
       transport: `
         node["highway"="bus_stop"](around:${safeRadius},${lat},${lng});
         node["railway"~"station|halt"](around:${safeRadius},${lat},${lng});
+        way["railway"~"station|halt"](around:${safeRadius},${lat},${lng});
       `,
       shopping: `
         node["shop"](around:${safeRadius},${lat},${lng});
         way["shop"](around:${safeRadius},${lat},${lng});
         node["amenity"~"marketplace|supermarket"](around:${safeRadius},${lat},${lng});
+        way["amenity"~"marketplace|supermarket"](around:${safeRadius},${lat},${lng});
       `,
       park: `
         node["leisure"="park"](around:${safeRadius},${lat},${lng});
         way["leisure"="park"](around:${safeRadius},${lat},${lng});
+        relation["leisure"="park"](around:${safeRadius},${lat},${lng});
       `,
       medical: `
         node["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
         way["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
+        relation["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
       `
     };
 
@@ -78,61 +83,79 @@ export default async function handler(req, res) {
     }
 
     const overpassQuery = `
-  [out:json][timeout:8];
-  (
-    ${queryParts}
-  );
-  out center;
+[out:json][timeout:8];
+(
+${queryParts}
+);
+out center;
 `;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    let overpassData = null;
+    let lastOverpassError = null;
 
-    let overpassData;
+    const overpassEndpoints = [
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass-api.de/api/interpreter"
+    ];
 
-    try {
-      const response = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-        },
-        body: new URLSearchParams({
-          data: overpassQuery
-        }),
-        signal: controller.signal
-      });
+    for (const endpoint of overpassEndpoints) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      clearTimeout(timeoutId);
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Accept": "application/json"
+          },
+          body: new URLSearchParams({
+            data: overpassQuery
+          }).toString(),
+          signal: controller.signal
+        });
 
-      if (!response.ok) {
-  const errorText = await response.text();
+        clearTimeout(timeoutId);
 
-  return res.status(200).json({
-    success: false,
-    error: "OVERPASS_ERROR",
-    message: "Overpass API 回應失敗，請縮小半徑或稍後再試。",
-    overpassStatus: response.status,
-    overpassStatusText: response.statusText,
-    overpassBody: errorText.slice(0, 300),
-    query: {
-      address,
-      lat,
-      lng,
-      radius: safeRadius,
-      categories: safeCategories
-    },
-    facilities: []
-  });
-}
+        if (!response.ok) {
+          const errorText = await response.text();
 
-      overpassData = await response.json();
-    } catch (error) {
-      clearTimeout(timeoutId);
+          lastOverpassError = {
+            endpoint,
+            status: response.status,
+            statusText: response.statusText,
+            body: errorText.slice(0, 300)
+          };
 
+          continue;
+        }
+
+        overpassData = await response.json();
+        break;
+
+      } catch (error) {
+        clearTimeout(timeoutId);
+
+        lastOverpassError = {
+          endpoint,
+          status: "FETCH_FAILED",
+          statusText: error.name || "FetchError",
+          body: error.message || "Overpass request failed"
+        };
+
+        continue;
+      }
+    }
+
+    if (!overpassData) {
       return res.status(200).json({
         success: false,
-        error: "QUERY_TIMEOUT_OR_FAILED",
-        message: "周邊機能查詢逾時或失敗，請縮小半徑或減少分類後再試。",
+        error: "OVERPASS_ERROR",
+        message: "Overpass API 回應失敗，請縮小半徑或稍後再試。",
+        overpassEndpoint: lastOverpassError?.endpoint || null,
+        overpassStatus: lastOverpassError?.status || null,
+        overpassStatusText: lastOverpassError?.statusText || null,
+        overpassBody: lastOverpassError?.body || null,
         query: {
           address,
           lat,
@@ -182,7 +205,7 @@ export default async function handler(req, res) {
 
     for (const cat of safeCategories) {
       const group = uniqueFacilities
-        .filter((item) => item.category === cat || item.category === "other")
+        .filter((item) => item.category === cat)
         .sort((a, b) => a.distance_meters - b.distance_meters)
         .slice(0, 5);
 
@@ -209,6 +232,7 @@ export default async function handler(req, res) {
       success: false,
       error: "SERVER_ERROR",
       message: "伺服器處理失敗，請稍後再試。",
+      detail: error.message || "Unknown server error",
       facilities: []
     });
   }
@@ -219,9 +243,11 @@ function detectCategory(tags = {}) {
     if (["school", "kindergarten", "college", "university"].includes(tags.amenity)) {
       return "school";
     }
+
     if (["hospital", "clinic", "doctors", "pharmacy"].includes(tags.amenity)) {
       return "medical";
     }
+
     if (["marketplace", "supermarket"].includes(tags.amenity)) {
       return "shopping";
     }
