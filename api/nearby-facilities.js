@@ -212,20 +212,30 @@ out center;
       limitedFacilities.push(...group);
     }
 
-    return res.status(200).json({
-      success: true,
-      query: {
-        address,
-        lat,
-        lng,
-        radius: safeRadius,
-        categories: safeCategories
-      },
-      facilities: limitedFacilities,
-      note: limitedFacilities.length > 0
-        ? "查詢完成。距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。"
-        : "查詢完成，但指定範圍內未取得符合條件的設施資料。"
-    });
+   const summary = buildFacilitySummary(limitedFacilities, safeRadius);
+
+return res.status(200).json({
+  success: true,
+  query: {
+    address,
+    lat,
+    lng,
+    radius: safeRadius,
+return res.status(200).json({
+  success: true,
+  query: {
+    address,
+    lat,
+    lng,
+    radius: safeRadius,
+    categories: safeCategories
+  },
+  facilities: limitedFacilities,
+  summary,
+  note: limitedFacilities.length > 0
+    ? "查詢完成。距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。"
+    : "查詢完成，但指定範圍內未取得符合條件的設施資料。"
+});
 
   } catch (error) {
     return res.status(200).json({
