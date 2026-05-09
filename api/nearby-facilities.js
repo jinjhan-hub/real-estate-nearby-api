@@ -103,17 +103,15 @@ out center;
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "Accept": "application/json"
-          },
-          body: new URLSearchParams({
-            data: overpassQuery
-          }).toString(),
-          signal: controller.signal
-        });
+       const url = `${endpoint}?data=${encodeURIComponent(overpassQuery)}`;
+
+const response = await fetch(url, {
+  method: "GET",
+  headers: {
+    "Accept": "application/json"
+  },
+  signal: controller.signal
+});
 
         clearTimeout(timeoutId);
 
