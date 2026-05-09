@@ -34,9 +34,13 @@ const MODULE_MAP = {
   },
 
   api_actions: {
-    type: "single",
-    file: "08_API_ACTIONS_MASTER.txt"
-  },
+  type: "folder",
+  files: [
+    "08_api_actions/00_API_ACTIONS_OVERVIEW.txt",
+    "08_api_actions/01_NEARBY_API_CONTRACT.txt",
+    "08_api_actions/02_GITHUB_KNOWLEDGE_LOADER_RULES.txt"
+  ]
+}
 
   examples: {
     type: "single",
