@@ -1,39 +1,24 @@
 const MODULE_MAP = {
   sales_generator: {
-type: "folder",
-files: [
-"02_sales_generator/00_MODULE_OVERVIEW.txt",
+  type: "folder",
+  files: [
+    "02_sales_generator/00_MODULE_OVERVIEW.txt",
+    "02_sales_generator/01_PROPERTY_DATA_EXTRACTION.txt",
+    "02_sales_generator/02_BUSINESS_CARD_EXTRACTION.txt",
+    "02_sales_generator/03_SALES_IMAGE_CARD_RULES.txt",
+    "02_sales_generator/04_COPY_PLATFORM_RULES.txt",
+    "02_sales_generator/05_STYLE_LIBRARY.txt",
+    "02_sales_generator/06_CONFIRMATION_FLOW.txt",
+    "02_sales_generator/07_GLOBAL_OUTPUT_RULES.txt",
+    "02_sales_generator/08_FB_TEMPLATE.txt",
+    "02_sales_generator/09_IG_TEMPLATE.txt",
+    "02_sales_generator/10_THREADS_TEMPLATE.txt",
+    "02_sales_generator/11_CTA_LIBRARY.txt",
+    "02_sales_generator/12_HASHTAG_RULES.txt",
 
-```
-"02_sales_generator/01_PROPERTY_DATA_EXTRACTION.txt",
-
-"02_sales_generator/02_BUSINESS_CARD_EXTRACTION.txt",
-
-"02_sales_generator/03_SALES_IMAGE_CARD_RULES.txt",
-
-"02_sales_generator/04_COPY_PLATFORM_RULES.txt",
-
-"02_sales_generator/05_STYLE_LIBRARY.txt",
-
-"02_sales_generator/06_CONFIRMATION_FLOW.txt",
-
-"02_sales_generator/07_GLOBAL_OUTPUT_RULES.txt",
-
-"02_sales_generator/08_FB_TEMPLATE.txt",
-
-"02_sales_generator/09_IG_TEMPLATE.txt",
-
-"02_sales_generator/10_THREADS_TEMPLATE.txt",
-
-"02_sales_generator/11_CTA_LIBRARY.txt",
-
-"02_sales_generator/12_HASHTAG_RULES.txt",
-
-// 舊版保留（過渡期）
-"02_sales_generator/06_OUTPUT_TEMPLATES.txt"
-```
-
-]
+    // 舊版保留（過渡期）
+    "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
+  ]
 },
 
 
