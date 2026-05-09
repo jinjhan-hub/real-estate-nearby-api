@@ -72,10 +72,19 @@ const MODULE_MAP = {
 },
 
   examples: {
-    type: "single",
-    file: "99_EXAMPLES_MASTER_OPTIONAL.txt"
-  }
-};
+  type: "folder",
+  files: [
+    "99_examples/01_PROPERTY_CONFIRMATION_EXAMPLE.txt",
+    "99_examples/02_FB_COPY_EXAMPLE.txt",
+    "99_examples/03_THREADS_EXAMPLE.txt",
+
+    "99_examples/04_FB_INVEST_CASE.txt",
+    "99_examples/05_FB_SELFUSE_CASE.txt",
+    "99_examples/06_IG_LIFESTYLE_CASE.txt",
+    "99_examples/07_THREADS_OBSERVATION_CASE.txt",
+    "99_examples/08_SHORT_MINIMAL_CASE.txt"
+  ]
+}
 
 const GITHUB_ROOT_BASE =
   "https://raw.githubusercontent.com/jinjhan-hub/real-estate-gpt-knowledge/main";
