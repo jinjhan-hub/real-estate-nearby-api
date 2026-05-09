@@ -83,7 +83,9 @@ const MODULE_MAP = {
     "99_examples/07_THREADS_OBSERVATION_CASE.txt",
     "99_examples/08_SHORT_MINIMAL_CASE.txt"
   ]
-},
+}
+
+};
 
 const GITHUB_ROOT_BASE =
   "https://raw.githubusercontent.com/jinjhan-hub/real-estate-gpt-knowledge/main";
