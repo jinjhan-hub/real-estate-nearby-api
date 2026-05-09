@@ -78,12 +78,12 @@ export default async function handler(req, res) {
     }
 
     const overpassQuery = `
-      [out:json][timeout:8];
-      (
-        ${queryParts}
-      );
-      out center tags;
-    `;
+  [out:json][timeout:8];
+  (
+    ${queryParts}
+  );
+  out center;
+`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -105,20 +105,25 @@ export default async function handler(req, res) {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        return res.status(200).json({
-          success: false,
-          error: "OVERPASS_ERROR",
-          message: "Overpass API 回應失敗，請縮小半徑或稍後再試。",
-          query: {
-            address,
-            lat,
-            lng,
-            radius: safeRadius,
-            categories: safeCategories
-          },
-          facilities: []
-        });
-      }
+  const errorText = await response.text();
+
+  return res.status(200).json({
+    success: false,
+    error: "OVERPASS_ERROR",
+    message: "Overpass API 回應失敗，請縮小半徑或稍後再試。",
+    overpassStatus: response.status,
+    overpassStatusText: response.statusText,
+    overpassBody: errorText.slice(0, 300),
+    query: {
+      address,
+      lat,
+      lng,
+      radius: safeRadius,
+      categories: safeCategories
+    },
+    facilities: []
+  });
+}
 
       overpassData = await response.json();
     } catch (error) {
