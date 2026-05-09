@@ -70,6 +70,19 @@ const MODULE_MAP = {
     "08_api_actions/02_GITHUB_KNOWLEDGE_LOADER_RULES.txt"
   ]
 },
+  
+  workflows: {
+  type: "folder",
+  files: [
+    "09_workflows/01_PROPERTY_CONFIRMATION_WORKFLOW.txt",
+    "09_workflows/02_PLATFORM_SELECTION_WORKFLOW.txt",
+    "09_workflows/03_STYLE_SELECTION_WORKFLOW.txt",
+    "09_workflows/04_IMAGE_GENERATION_WORKFLOW.txt",
+    "09_workflows/05_COPY_GENERATION_WORKFLOW.txt",
+    "09_workflows/06_IMAGE_COPY_SEPARATION_WORKFLOW.txt",
+    "09_workflows/07_FINAL_CONFIRMATION_WORKFLOW.txt"
+  ]
+},
 
  examples: {
   type: "folder",
