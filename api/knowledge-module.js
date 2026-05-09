@@ -1,11 +1,11 @@
 const MODULE_MAP = {
   sales_generator: {
     type: "folder",
-    files: [
-      "02_sales_generator/01_RULES.txt",
-      "02_sales_generator/02_VARIABLE_SCHEMA.txt",
-      "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
-    ]
+   files: [
+  "02_sales_generator/00_MODULE_OVERVIEW.txt",
+  "02_sales_generator/01_PROPERTY_DATA_EXTRACTION.txt",
+  "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
+]
   },
 
   nearby_facilities: {
