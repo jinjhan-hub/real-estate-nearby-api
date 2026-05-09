@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // 只接受 POST
   if (req.method !== "POST") {
     return res.status(405).json({
       success: false,
@@ -12,7 +11,6 @@ export default async function handler(req, res) {
   try {
     const { address, lat, lng, radius = 500, categories = [] } = req.body || {};
 
-    // 基本檢查
     if (!address || typeof lat !== "number" || typeof lng !== "number") {
       return res.status(400).json({
         success: false,
@@ -22,10 +20,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // 限制半徑，避免查詢過重
     const safeRadius = Math.min(Number(radius) || 500, 1000);
 
-    // 限制分類數量，避免一次查太多造成 timeout
     const safeCategories = Array.isArray(categories)
       ? categories.slice(0, 2)
       : [];
@@ -163,7 +159,8 @@ out center;
           radius: safeRadius,
           categories: safeCategories
         },
-        facilities: []
+        facilities: [],
+        summary: buildFacilitySummary([], safeRadius)
       });
     }
 
@@ -189,7 +186,6 @@ out center;
       });
     }
 
-    // 去除重複名稱
     const uniqueFacilities = [];
     const seen = new Set();
 
@@ -200,7 +196,6 @@ out center;
       uniqueFacilities.push(item);
     }
 
-    // 依距離排序，每類最多 5 筆
     const limitedFacilities = [];
 
     for (const cat of safeCategories) {
@@ -212,30 +207,23 @@ out center;
       limitedFacilities.push(...group);
     }
 
-   const summary = buildFacilitySummary(limitedFacilities, safeRadius);
+    const summary = buildFacilitySummary(limitedFacilities, safeRadius);
 
-return res.status(200).json({
-  success: true,
-  query: {
-    address,
-    lat,
-    lng,
-    radius: safeRadius,
-return res.status(200).json({
-  success: true,
-  query: {
-    address,
-    lat,
-    lng,
-    radius: safeRadius,
-    categories: safeCategories
-  },
-  facilities: limitedFacilities,
-  summary,
-  note: limitedFacilities.length > 0
-    ? "查詢完成。距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。"
-    : "查詢完成，但指定範圍內未取得符合條件的設施資料。"
-});
+    return res.status(200).json({
+      success: true,
+      query: {
+        address,
+        lat,
+        lng,
+        radius: safeRadius,
+        categories: safeCategories
+      },
+      facilities: limitedFacilities,
+      summary,
+      note: limitedFacilities.length > 0
+        ? "查詢完成。距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。"
+        : "查詢完成，但指定範圍內未取得符合條件的設施資料。"
+    });
 
   } catch (error) {
     return res.status(200).json({
@@ -243,7 +231,8 @@ return res.status(200).json({
       error: "SERVER_ERROR",
       message: "伺服器處理失敗，請稍後再試。",
       detail: error.message || "Unknown server error",
-      facilities: []
+      facilities: [],
+      summary: "周邊機能查詢失敗，請稍後再試，或縮小查詢半徑、減少查詢分類。"
     });
   }
 }
@@ -298,7 +287,11 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
 
 function buildFacilitySummary(facilities, radius) {
   if (!facilities || facilities.length === 0) {
-    return `周邊機能｜${radius} 公尺內\n\n指定範圍內未取得符合條件的設施資料。\n\n備註：查詢結果依 OpenStreetMap / Overpass API 資料回傳，若資料不足，請以 Google Maps 或實地查證為準。`;
+    return `周邊機能｜${radius} 公尺內
+
+指定範圍內未取得符合條件的設施資料。
+
+備註：查詢結果依 OpenStreetMap / Overpass API 資料回傳，若資料不足，請以 Google Maps 或實地查證為準。`;
   }
 
   const categoryLabels = {
