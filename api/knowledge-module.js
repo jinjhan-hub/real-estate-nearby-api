@@ -40,7 +40,7 @@ const MODULE_MAP = {
     "08_api_actions/01_NEARBY_API_CONTRACT.txt",
     "08_api_actions/02_GITHUB_KNOWLEDGE_LOADER_RULES.txt"
   ]
-}
+},
 
   examples: {
     type: "single",
