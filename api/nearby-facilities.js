@@ -20,21 +20,26 @@ export default async function handler(req, res) {
       });
     }
 
-    const safeRadius = Math.min(Number(radius) || 500, 1000);
+    const safeRadius = Math.min(Math.max(Number(radius) || 500, 100), 500);
 
-    const safeCategories = Array.isArray(categories)
-      ? categories.slice(0, 2)
-      : [];
+const allowedCategories = ["school", "transport", "shopping", "park", "medical"];
 
-    if (safeCategories.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: "NO_CATEGORIES",
-        message: "請至少提供一個查詢類別。",
-        facilities: []
-      });
-    }
+const rawCategories = Array.isArray(categories) && categories.length > 0
+  ? categories
+  : allowedCategories;
 
+const safeCategories = [...new Set(rawCategories)]
+  .filter((category) => allowedCategories.includes(category))
+  .slice(0, 5);
+
+if (safeCategories.length === 0) {
+  return res.status(400).json({
+    success: false,
+    error: "NO_CATEGORIES",
+    message: "請至少提供一個有效查詢類別。支援 school、transport、shopping、park、medical。",
+    facilities: []
+  });
+}
     const categoryMap = {
       school: `
         node["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
