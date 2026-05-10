@@ -25,6 +25,7 @@ const MODULE_MAP = {
 "02_sales_generator/20_THREADS_HOOK_LIBRARY.txt",
 "02_sales_generator/21_OBSERVATION_LIBRARY.txt",
 "02_sales_generator/22_EMOTIONAL_TRANSITION_LIBRARY.txt",
+"02_sales_generator/23_ERROR_CASES.txt",
     
     // 舊版保留（過渡期）
     "02_sales_generator/06_OUTPUT_TEMPLATES.txt"
