@@ -172,24 +172,28 @@ out center;
     const facilities = [];
 
     for (const item of overpassData.elements || []) {
-      const name = item.tags?.name;
-      if (!name) continue;
+  const name = item.tags?.name;
+  if (!name) continue;
 
-      const itemLat = item.lat || item.center?.lat;
-      const itemLng = item.lon || item.center?.lon;
+  const itemLat = item.lat || item.center?.lat;
+  const itemLng = item.lon || item.center?.lon;
 
-      if (!itemLat || !itemLng) continue;
+  if (!itemLat || !itemLng) continue;
 
-      const category = detectCategory(item.tags);
+  const distanceMeters = Math.round(getDistanceMeters(lat, lng, itemLat, itemLng));
 
-      facilities.push({
-        category,
-        name,
-        distance_meters: Math.round(getDistanceMeters(lat, lng, itemLat, itemLng)),
-        lat: itemLat,
-        lng: itemLng
-      });
-    }
+  if (distanceMeters > safeRadius) continue;
+
+  const category = detectCategory(item.tags);
+
+  facilities.push({
+    category,
+    name,
+    distance_meters: distanceMeters,
+    lat: itemLat,
+    lng: itemLng
+  });
+}
 
     const uniqueFacilities = [];
     const seen = new Set();
