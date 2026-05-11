@@ -111,9 +111,22 @@ const MODULE_MAP = {
     file: "06_MARKET_CONTENT_MASTER.txt"
   },
 
-  tax_calculator: {
-    type: "single",
-    file: "07_TAX_CALCULATOR_MASTER.txt"
+  tax_redirect: {
+  type: "folder",
+  files: [
+    "07_tax_redirect/00_TAX_ENTRY_REDIRECT_RULES.txt"
+  ]
+},
+
+tax_calculator_dev: {
+  type: "folder",
+  files: [
+    "07_tax_calculator/00_TAX_CALCULATOR_OVERVIEW.txt",
+    "07_tax_calculator/01_HOUSE_LAND_TRANSACTION_TAX_RULES.txt",
+    "07_tax_calculator/02_LAND_VALUE_INCREMENT_TAX_RULES.txt",
+    "07_tax_calculator/03_PRINT_AND_UI_RULES.txt"
+  ]
+}
   },
 
   api_actions: {
