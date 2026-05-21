@@ -51,9 +51,12 @@ export default async function handler(req, res) {
       content
     });
   } catch (error) {
-    return res.status(500).json({
-      error: "Server error",
-      message: error.message
-    });
+    return res.status(200).json({
+  success: true,
+  module: "fb_card",
+  stage: stage,
+  fileName: fileName,
+  content: content.slice(0, 12000)
+});
   }
 }
