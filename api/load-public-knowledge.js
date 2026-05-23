@@ -1,5 +1,6 @@
 export default async function handler(req, res) {
   // CORS / GPTs Actions 相容處理
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
