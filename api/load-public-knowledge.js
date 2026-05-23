@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS / GPTs Actions 相容處理
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -8,13 +7,23 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(200).json({
       ok: true,
-      message: "OPTIONS ok"
+      success: true,
+      stage: "options",
+      fileName: "",
+      contentLength: 0,
+      knowledgeText: "OPTIONS ok",
+      error: ""
     });
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({
+    return res.status(200).json({
       ok: false,
+      success: false,
+      stage: "",
+      fileName: "",
+      contentLength: 0,
+      knowledgeText: "",
       error: "POST only"
     });
   }
@@ -22,13 +31,17 @@ export default async function handler(req, res) {
   try {
     let body = req.body;
 
-    // 避免某些環境把 body 當成字串傳入
     if (typeof body === "string") {
       try {
         body = JSON.parse(body);
       } catch (error) {
-        return res.status(400).json({
+        return res.status(200).json({
           ok: false,
+          success: false,
+          stage: "",
+          fileName: "",
+          contentLength: 0,
+          knowledgeText: "",
           error: "invalid JSON body"
         });
       }
@@ -49,67 +62,70 @@ export default async function handler(req, res) {
     const fileName = files[stage];
 
     if (!fileName) {
-      return res.status(400).json({
+      return res.status(200).json({
         ok: false,
+        success: false,
+        stage,
+        fileName: "",
+        contentLength: 0,
+        knowledgeText: "",
         error: "invalid stage",
-        receivedStage: stage,
         allowedStages: Object.keys(files)
       });
     }
 
     const sourceUrl = `https://raw.githubusercontent.com/jinjhan-hub/real-estate-gpt-knowledge/main/fb_card_public/${fileName}`;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    let response;
-
-    try {
-      response = await fetch(sourceUrl, {
-        method: "GET",
-        cache: "no-store",
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+    const response = await fetch(sourceUrl, {
+      method: "GET",
+      cache: "no-store"
+    });
 
     if (!response.ok) {
-      return res.status(500).json({
+      return res.status(200).json({
         ok: false,
-        error: "github load failed",
+        success: false,
         stage,
         fileName,
-        sourceUrl,
-        githubStatus: response.status
+        contentLength: 0,
+        knowledgeText: "",
+        error: `github load failed: ${response.status}`
       });
     }
 
     const text = await response.text();
+    const cleanText = String(text || "").trim();
 
-    if (!text || text.trim().length === 0) {
-      return res.status(500).json({
+    if (!cleanText) {
+      return res.status(200).json({
         ok: false,
-        error: "knowledge file is empty",
+        success: false,
         stage,
         fileName,
-        sourceUrl
+        contentLength: 0,
+        knowledgeText: "",
+        error: "knowledge file is empty"
       });
     }
 
     return res.status(200).json({
       ok: true,
-      module: "fb_card_public",
+      success: true,
       stage,
       fileName,
-      contentLength: text.length,
-      knowledgeText: text.substring(0, 8000)
+      contentLength: cleanText.length,
+      knowledgeText: cleanText.substring(0, 7500),
+      error: ""
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(200).json({
       ok: false,
-      error: "server error",
-      message: error.message
+      success: false,
+      stage: "",
+      fileName: "",
+      contentLength: 0,
+      knowledgeText: "",
+      error: error.message || "server error"
     });
   }
 }
