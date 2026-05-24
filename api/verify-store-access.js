@@ -1,4 +1,4 @@
-const RUNTIME_VERSION = "verify-store-access-2026-05-24-v6";
+const RUNTIME_VERSION = "verify-store-access-2026-05-24-v7";
 const SOURCE = "verify-store-access-api";
 
 const EXPECTED_STORES = {
@@ -178,9 +178,9 @@ export default function handler(req, res) {
 
     const missingDisclosure = [];
 
-    if (!disclosure.brokerageName) missingDisclosure.push("brokerageName");
-    if (!disclosure.brokerName) missingDisclosure.push("brokerName");
-    if (!disclosure.brokerLicenseNo) missingDisclosure.push("brokerLicenseNo");
+    if (!safeString(disclosure.brokerageName)) missingDisclosure.push("brokerageName");
+    if (!safeString(disclosure.brokerName)) missingDisclosure.push("brokerName");
+    if (!safeString(disclosure.brokerLicenseNo)) missingDisclosure.push("brokerLicenseNo");
 
     if (missingDisclosure.length > 0) {
       return fail("DISCLOSURE_INCOMPLETE", "店家公版揭露資料不完整，請聯絡管理者。", {
