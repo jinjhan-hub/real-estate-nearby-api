@@ -6,7 +6,7 @@ const EXPECTED_STORES = {
   CH002: "彰化彰美店",
   CH003: "員林僑信店",
   CH004: "員林萬年店",
-  CH005: "彰化井川永安店"
+  CH005: "彰化川井永安店"
 };
 
 function setCors(res) {
