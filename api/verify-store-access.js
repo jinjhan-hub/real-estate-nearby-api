@@ -108,15 +108,25 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({
-      ok: true,
-      verified: true,
-      storeId: inputStoreId,
-      storeName: store.storeName || "",
-      expiresAt: store.expiresAt,
-      features: store.features || [],
-      message: "認證成功。"
-    });
+    const diffMs = expiresAt.getTime() - now.getTime();
+const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+return res.status(200).json({
+  ok: true,
+  verified: true,
+  storeId: inputStoreId,
+  storeName: store.storeName || "",
+  expiresAt: store.expiresAt,
+  remainingDays,
+  remainingDaysText: `剩餘 ${remainingDays} 天`,
+  features: store.features || [],
+  disclosure: store.disclosure || {
+    brokerageName: "",
+    brokerName: "",
+    brokerLicenseNo: ""
+  },
+  message: "認證成功。"
+});
 
   } catch (error) {
     return res.status(500).json({
