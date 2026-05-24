@@ -1,11 +1,18 @@
 export default function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+  const fail = (reason, message, extra = {}) => {
+    return res.status(200).json({
       verified: false,
       success: false,
-      reason: "METHOD_NOT_ALLOWED",
-      message: "Only POST is allowed"
+      reason,
+      message,
+      ...extra
     });
+  };
+
+  if (req.method !== "POST") {
+    return fail("METHOD_NOT_ALLOWED", "Only POST is allowed");
   }
 
   try {
@@ -33,64 +40,59 @@ export default function handler(req, res) {
     ).trim();
 
     if (!storeId || !accessCode) {
-      return res.status(400).json({
-        verified: false,
-        success: false,
-        reason: "MISSING_INPUT",
-        message: "請輸入店家代號與認證碼。"
+      return fail("MISSING_INPUT", "請輸入店家代號與認證碼。", {
+        requestedStoreId: storeId
       });
     }
 
     const rawConfig = process.env.STORE_ACCESS_CONFIG;
 
     if (!rawConfig) {
-      return res.status(500).json({
-        verified: false,
-        success: false,
-        reason: "ENV_NOT_SET",
-        message: "尚未設定 STORE_ACCESS_CONFIG。"
+      return fail("ENV_NOT_SET", "尚未設定 STORE_ACCESS_CONFIG。", {
+        requestedStoreId: storeId,
+        configSource: "STORE_ACCESS_CONFIG"
       });
     }
 
     let stores;
 
     try {
-      stores = JSON.parse(rawConfig);
+      stores = JSON.parse(rawConfig.trim());
     } catch (error) {
-      return res.status(500).json({
-        verified: false,
-        success: false,
-        reason: "ENV_PARSE_ERROR",
-        message: "STORE_ACCESS_CONFIG 不是有效 JSON。"
+      return fail("ENV_PARSE_ERROR", "STORE_ACCESS_CONFIG 不是有效 JSON。", {
+        requestedStoreId: storeId,
+        configSource: "STORE_ACCESS_CONFIG"
+      });
+    }
+
+    if (!stores || typeof stores !== "object" || Array.isArray(stores)) {
+      return fail("ENV_PARSE_ERROR", "STORE_ACCESS_CONFIG 格式錯誤，必須是店家物件資料。", {
+        requestedStoreId: storeId,
+        configSource: "STORE_ACCESS_CONFIG"
       });
     }
 
     const store = stores[storeId];
 
     if (!store) {
-      return res.status(404).json({
-        verified: false,
-        success: false,
-        reason: "STORE_NOT_FOUND",
-        message: "查無此店家代號，請確認輸入是否正確。"
+      return fail("STORE_NOT_FOUND", "查無此店家代號，請確認 Vercel Production 的 STORE_ACCESS_CONFIG 是否包含此店家。", {
+        requestedStoreId: storeId,
+        configSource: "STORE_ACCESS_CONFIG",
+        storeCount: Object.keys(stores).length
       });
     }
 
-    if (String(store.code).trim() !== accessCode) {
-      return res.status(401).json({
-        verified: false,
-        success: false,
-        reason: "INVALID_CODE",
-        message: "認證碼錯誤，請重新輸入。"
+    if (String(store.code || "").trim() !== accessCode) {
+      return fail("INVALID_CODE", "認證碼錯誤，請重新輸入。", {
+        requestedStoreId: storeId,
+        storeName: store.storeName || ""
       });
     }
 
     if (store.active !== true) {
-      return res.status(403).json({
-        verified: false,
-        success: false,
-        reason: "STORE_DISABLED",
-        message: "此認證碼已停用，請聯絡管理者。"
+      return fail("STORE_DISABLED", "此認證碼已停用，請聯絡管理者。", {
+        requestedStoreId: storeId,
+        storeName: store.storeName || ""
       });
     }
 
@@ -99,12 +101,19 @@ export default function handler(req, res) {
       ? new Date(`${store.expiresAt}T23:59:59+08:00`)
       : null;
 
+    if (expiresAtDate && Number.isNaN(expiresAtDate.getTime())) {
+      return fail("INVALID_EXPIRES_AT", "店家到期日格式錯誤，請聯絡管理者。", {
+        requestedStoreId: storeId,
+        storeName: store.storeName || "",
+        expiresAt: store.expiresAt || ""
+      });
+    }
+
     if (expiresAtDate && now > expiresAtDate) {
-      return res.status(403).json({
-        verified: false,
-        success: false,
-        reason: "EXPIRED",
-        message: "此認證碼已過期，請聯絡管理者。"
+      return fail("EXPIRED", "此認證碼已過期，請聯絡管理者。", {
+        requestedStoreId: storeId,
+        storeName: store.storeName || "",
+        expiresAt: store.expiresAt || ""
       });
     }
 
@@ -129,7 +138,6 @@ export default function handler(req, res) {
       reason: "OK",
       storeId,
       storeName: store.storeName || "",
-      code: store.code || "",
       startAt: store.startAt || "",
       expiresAt: store.expiresAt || "",
       active: true,
@@ -144,11 +152,6 @@ export default function handler(req, res) {
       missingDisclosure
     });
   } catch (error) {
-    return res.status(500).json({
-      verified: false,
-      success: false,
-      reason: "SERVER_ERROR",
-      message: "系統驗證失敗，請稍後再試或聯絡管理者。"
-    });
+    return fail("SERVER_ERROR", "系統驗證失敗，請稍後再試或聯絡管理者。");
   }
 }
