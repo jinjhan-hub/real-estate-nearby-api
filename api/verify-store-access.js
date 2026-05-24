@@ -1,140 +1,154 @@
-export default async function handler(req, res) {
-  // 允許 GPTs Action 呼叫
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
+export default function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
-      ok: false,
       verified: false,
+      success: false,
       reason: "METHOD_NOT_ALLOWED",
-      message: "Only POST method is allowed."
+      message: "Only POST is allowed"
     });
   }
 
   try {
-    const { storeId, code } = req.body || {};
+    const body = req.body || {};
 
-    if (!storeId || !code) {
+    const storeId = String(
+      body.storeId ||
+      body.storeCode ||
+      body.store ||
+      body.storeNo ||
+      body.id ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+    const accessCode = String(
+      body.accessCode ||
+      body.verifyCode ||
+      body.verificationCode ||
+      body.authCode ||
+      body.password ||
+      body.code ||
+      ""
+    ).trim();
+
+    if (!storeId || !accessCode) {
       return res.status(400).json({
-        ok: false,
         verified: false,
+        success: false,
         reason: "MISSING_INPUT",
         message: "請輸入店家代號與認證碼。"
       });
     }
 
-    const rawCodes = process.env.STORE_ACCESS_CODES;
+    const rawConfig = process.env.STORE_ACCESS_CONFIG;
 
-    if (!rawCodes) {
+    if (!rawConfig) {
       return res.status(500).json({
-        ok: false,
         verified: false,
+        success: false,
         reason: "ENV_NOT_SET",
-        message: "尚未設定 STORE_ACCESS_CODES。"
+        message: "尚未設定 STORE_ACCESS_CONFIG。"
       });
     }
 
     let stores;
 
     try {
-      stores = JSON.parse(rawCodes);
+      stores = JSON.parse(rawConfig);
     } catch (error) {
       return res.status(500).json({
-        ok: false,
         verified: false,
-        reason: "ENV_JSON_INVALID",
-        message: "STORE_ACCESS_CODES 格式錯誤，請檢查 JSON。"
+        success: false,
+        reason: "ENV_PARSE_ERROR",
+        message: "STORE_ACCESS_CONFIG 不是有效 JSON。"
       });
     }
 
-    const inputStoreId = String(storeId).trim();
-    const inputCode = String(code).trim();
-
-    const store = stores[inputStoreId];
+    const store = stores[storeId];
 
     if (!store) {
-      return res.status(401).json({
-        ok: false,
+      return res.status(404).json({
         verified: false,
+        success: false,
         reason: "STORE_NOT_FOUND",
-        message: "查無此店家代號。"
+        message: "查無此店家代號，請確認輸入是否正確。"
       });
     }
 
-    if (!store.active) {
-      return res.status(403).json({
-        ok: false,
-        verified: false,
-        reason: "STORE_DISABLED",
-        message: "此認證碼已停用。"
-      });
-    }
-
-    if (String(store.code).trim() !== inputCode) {
+    if (String(store.code).trim() !== accessCode) {
       return res.status(401).json({
-        ok: false,
         verified: false,
+        success: false,
         reason: "INVALID_CODE",
-        message: "認證碼錯誤。"
+        message: "認證碼錯誤，請重新輸入。"
+      });
+    }
+
+    if (store.active !== true) {
+      return res.status(403).json({
+        verified: false,
+        success: false,
+        reason: "STORE_DISABLED",
+        message: "此認證碼已停用，請聯絡管理者。"
       });
     }
 
     const now = new Date();
+    const expiresAtDate = store.expiresAt
+      ? new Date(`${store.expiresAt}T23:59:59+08:00`)
+      : null;
 
-    // expiresAt 用台灣時間當天 23:59:59 結束
-    const expiresAt = new Date(`${store.expiresAt}T23:59:59+08:00`);
-
-    if (Number.isNaN(expiresAt.getTime())) {
-      return res.status(500).json({
-        ok: false,
-        verified: false,
-        reason: "INVALID_EXPIRES_AT",
-        message: "到期日格式錯誤，請使用 YYYY-MM-DD。"
-      });
-    }
-
-    if (now > expiresAt) {
+    if (expiresAtDate && now > expiresAtDate) {
       return res.status(403).json({
-        ok: false,
         verified: false,
+        success: false,
         reason: "EXPIRED",
-        message: "此認證碼已過期。"
+        message: "此認證碼已過期，請聯絡管理者。"
       });
     }
 
-    const diffMs = expiresAt.getTime() - now.getTime();
-const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    const remainingDays = expiresAtDate
+      ? Math.max(
+          0,
+          Math.ceil((expiresAtDate.getTime() - now.getTime()) / 86400000)
+        )
+      : null;
 
-return res.status(200).json({
-  ok: true,
-  verified: true,
-  storeId: inputStoreId,
-  storeName: store.storeName || "",
-  expiresAt: store.expiresAt,
-  remainingDays,
-  remainingDaysText: `剩餘 ${remainingDays} 天`,
-  features: store.features || [],
-  disclosure: store.disclosure || {
-    brokerageName: "",
-    brokerName: "",
-    brokerLicenseNo: ""
-  },
-  message: "認證成功。"
-});
+    const disclosure = store.disclosure || {};
 
+    const missingDisclosure = [];
+
+    if (!disclosure.brokerageName) missingDisclosure.push("brokerageName");
+    if (!disclosure.brokerName) missingDisclosure.push("brokerName");
+    if (!disclosure.brokerLicenseNo) missingDisclosure.push("brokerLicenseNo");
+
+    return res.status(200).json({
+      verified: true,
+      success: true,
+      reason: "OK",
+      storeId,
+      storeName: store.storeName || "",
+      code: store.code || "",
+      startAt: store.startAt || "",
+      expiresAt: store.expiresAt || "",
+      active: true,
+      remainingDays,
+      features: Array.isArray(store.features) ? store.features : [],
+      disclosure: {
+        brokerageName: disclosure.brokerageName || "",
+        brokerName: disclosure.brokerName || "",
+        brokerLicenseNo: disclosure.brokerLicenseNo || ""
+      },
+      disclosureComplete: missingDisclosure.length === 0,
+      missingDisclosure
+    });
   } catch (error) {
     return res.status(500).json({
-      ok: false,
       verified: false,
+      success: false,
       reason: "SERVER_ERROR",
-      message: "系統驗證失敗。",
-      detail: error.message || "Unknown error"
+      message: "系統驗證失敗，請稍後再試或聯絡管理者。"
     });
   }
 }
