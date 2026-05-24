@@ -1,5 +1,37 @@
-export default function handler(req, res) {
+const RUNTIME_VERSION = "verify-store-access-2026-05-24-v6";
+const SOURCE = "verify-store-access-api";
+
+const EXPECTED_STORES = {
+  CH001: "彰化民族店",
+  CH002: "彰化彰美店",
+  CH003: "員林僑信店",
+  CH004: "員林萬年店",
+  CH005: "彰化井川永安店"
+};
+
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+}
+
+function safeString(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStoreId(value) {
+  return safeString(value).toUpperCase();
+}
+
+function makeRequestId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export default function handler(req, res) {
+  setCors(res);
+
+  const requestId = makeRequestId();
 
   const fail = (reason, message, extra = {}) => {
     return res.status(200).json({
@@ -7,9 +39,16 @@ export default function handler(req, res) {
       success: false,
       reason,
       message,
+      source: SOURCE,
+      runtimeVersion: RUNTIME_VERSION,
+      requestId,
       ...extra
     });
   };
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   if (req.method !== "POST") {
     return fail("METHOD_NOT_ALLOWED", "Only POST is allowed");
@@ -18,30 +57,33 @@ export default function handler(req, res) {
   try {
     const body = req.body || {};
 
-    const storeId = String(
+    const storeId = normalizeStoreId(
       body.storeId ||
       body.storeCode ||
       body.store ||
       body.storeNo ||
-      body.id ||
-      ""
-    )
-      .trim()
-      .toUpperCase();
+      body.id
+    );
 
-    const accessCode = String(
+    const accessCode = safeString(
       body.accessCode ||
       body.verifyCode ||
       body.verificationCode ||
       body.authCode ||
       body.password ||
-      body.code ||
-      ""
-    ).trim();
+      body.code
+    );
 
     if (!storeId || !accessCode) {
       return fail("MISSING_INPUT", "請輸入店家代號與認證碼。", {
         requestedStoreId: storeId
+      });
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(EXPECTED_STORES, storeId)) {
+      return fail("STORE_ID_NOT_ALLOWED", "此店家代號不在認證公版允許清單內。", {
+        requestedStoreId: storeId,
+        allowedStoreIds: Object.keys(EXPECTED_STORES)
       });
     }
 
@@ -75,28 +117,38 @@ export default function handler(req, res) {
     const store = stores[storeId];
 
     if (!store) {
-      return fail("STORE_NOT_FOUND", "查無此店家代號，請確認 Vercel Production 的 STORE_ACCESS_CONFIG 是否包含此店家。", {
+      return fail("STORE_NOT_FOUND", "查無此店家代號，請確認輸入是否正確。", {
         requestedStoreId: storeId,
         configSource: "STORE_ACCESS_CONFIG",
         storeCount: Object.keys(stores).length
       });
     }
 
-    if (String(store.code || "").trim() !== accessCode) {
-      return fail("INVALID_CODE", "認證碼錯誤，請重新輸入。", {
+    const expectedStoreName = EXPECTED_STORES[storeId];
+    const actualStoreName = safeString(store.storeName);
+
+    if (actualStoreName !== expectedStoreName) {
+      return fail("STORE_CONFIG_MISMATCH", "店家資料與系統允許清單不一致，請聯絡管理者。", {
         requestedStoreId: storeId,
-        storeName: store.storeName || ""
+        expectedStoreName,
+        actualStoreName
+      });
+    }
+
+    if (safeString(store.code) !== accessCode) {
+      return fail("INVALID_CODE", "認證碼錯誤，請重新輸入。", {
+        requestedStoreId: storeId
       });
     }
 
     if (store.active !== true) {
       return fail("STORE_DISABLED", "此認證碼已停用，請聯絡管理者。", {
-        requestedStoreId: storeId,
-        storeName: store.storeName || ""
+        requestedStoreId: storeId
       });
     }
 
     const now = new Date();
+
     const expiresAtDate = store.expiresAt
       ? new Date(`${store.expiresAt}T23:59:59+08:00`)
       : null;
@@ -104,7 +156,6 @@ export default function handler(req, res) {
     if (expiresAtDate && Number.isNaN(expiresAtDate.getTime())) {
       return fail("INVALID_EXPIRES_AT", "店家到期日格式錯誤，請聯絡管理者。", {
         requestedStoreId: storeId,
-        storeName: store.storeName || "",
         expiresAt: store.expiresAt || ""
       });
     }
@@ -112,7 +163,6 @@ export default function handler(req, res) {
     if (expiresAtDate && now > expiresAtDate) {
       return fail("EXPIRED", "此認證碼已過期，請聯絡管理者。", {
         requestedStoreId: storeId,
-        storeName: store.storeName || "",
         expiresAt: store.expiresAt || ""
       });
     }
@@ -132,24 +182,38 @@ export default function handler(req, res) {
     if (!disclosure.brokerName) missingDisclosure.push("brokerName");
     if (!disclosure.brokerLicenseNo) missingDisclosure.push("brokerLicenseNo");
 
+    if (missingDisclosure.length > 0) {
+      return fail("DISCLOSURE_INCOMPLETE", "店家公版揭露資料不完整，請聯絡管理者。", {
+        requestedStoreId: storeId,
+        missingDisclosure
+      });
+    }
+
     return res.status(200).json({
       verified: true,
       success: true,
       reason: "OK",
+      source: SOURCE,
+      runtimeVersion: RUNTIME_VERSION,
+      requestId,
+
       storeId,
-      storeName: store.storeName || "",
+      storeName: actualStoreName,
       startAt: store.startAt || "",
       expiresAt: store.expiresAt || "",
       active: true,
       remainingDays,
+
       features: Array.isArray(store.features) ? store.features : [],
+
       disclosure: {
-        brokerageName: disclosure.brokerageName || "",
-        brokerName: disclosure.brokerName || "",
-        brokerLicenseNo: disclosure.brokerLicenseNo || ""
+        brokerageName: safeString(disclosure.brokerageName),
+        brokerName: safeString(disclosure.brokerName),
+        brokerLicenseNo: safeString(disclosure.brokerLicenseNo)
       },
-      disclosureComplete: missingDisclosure.length === 0,
-      missingDisclosure
+
+      disclosureComplete: true,
+      missingDisclosure: []
     });
   } catch (error) {
     return fail("SERVER_ERROR", "系統驗證失敗，請稍後再試或聯絡管理者。");
