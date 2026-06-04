@@ -1,4 +1,6 @@
-const RUNTIME_VERSION = "nearby-facilities-v1.4.1-skeleton";
+import crypto from "crypto";
+
+const RUNTIME_VERSION = "nearby-facilities-v1.4.3-cache-lookup-skeleton";
 const SOURCE = "nearby-facilities-api";
 
 function setCors(res) {
@@ -148,6 +150,10 @@ function maskAddress(address) {
   return `${value.slice(0, 3)}***${value.slice(-3)}`;
 }
 
+function normalizeAddress(address) {
+  return safeString(address).replace(/\s+/g, " ");
+}
+
 function getRequestBody(req) {
   if (typeof req.body === "string") return JSON.parse(req.body || "{}");
   return req.body || {};
@@ -160,6 +166,59 @@ function getRequestedCategories(body, nearby) {
   if (rawCategories.length === 0) return allowedCategories;
 
   return [...new Set(rawCategories.map((category) => safeString(category)).filter(Boolean))];
+}
+
+function buildRequestHash({ storeId, normalizedAddress, radius, categories, language, region }) {
+  const hashPayload = {
+    storeId,
+    normalizedAddress,
+    radius,
+    categories: [...categories].sort(),
+    language,
+    region
+  };
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(hashPayload))
+    .digest("hex");
+}
+
+function buildCacheKey(requestHash) {
+  return `nearby:v1:${requestHash}`;
+}
+
+async function fetchNearbyCache(config, requestHash, cacheKey) {
+  const params = new URLSearchParams({
+    select: [
+      "cache_key",
+      "request_hash",
+      "result_json",
+      "result_count",
+      "expires_at"
+    ].join(","),
+    request_hash: `eq.${requestHash}`,
+    cache_key: `eq.${cacheKey}`,
+    expires_at: `gt.${new Date().toISOString()}`,
+    order: "expires_at.desc",
+    limit: "1"
+  });
+
+  const rows = await supabaseSelect(config, "nearby_cache", params.toString());
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+function buildCacheFacilities(cacheRow) {
+  const result = cacheRow?.result_json;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return {};
+  if (result.facilities && typeof result.facilities === "object") return result.facilities;
+  return {};
+}
+
+function buildCacheSummary(cacheRow) {
+  const result = cacheRow?.result_json;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+  return Array.isArray(result.summary) ? result.summary : [];
 }
 
 export default async function handler(req, res) {
@@ -311,7 +370,7 @@ export default async function handler(req, res) {
       );
     }
 
-    const address = safeString(body.address);
+    const address = normalizeAddress(body.address);
 
     if (!address) {
       return fail("MISSING_ADDRESS", "Address is required.", {
@@ -370,9 +429,58 @@ export default async function handler(req, res) {
       });
     }
 
+    const language = safeString(body.language) || "zh-TW";
+    const region = safeString(body.region) || "TW";
+    const requestHash = buildRequestHash({
+      storeId: safeString(store.store_id),
+      normalizedAddress: address,
+      radius,
+      categories,
+      language,
+      region
+    });
+    const cacheKey = buildCacheKey(requestHash);
+    const cacheHit = await fetchNearbyCache(config, requestHash, cacheKey);
+
+    if (cacheHit) {
+      return res.status(200).json({
+        success: true,
+        reason: "CACHE_HIT",
+        message: "Nearby facility cache was found.",
+        apiSource: SOURCE,
+        runtimeVersion: RUNTIME_VERSION,
+        requestId,
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        query: {
+          addressMasked: maskAddress(address),
+          radius,
+          categories,
+          language,
+          region
+        },
+        source: {
+          cacheHit: true,
+          googleApiCalled: false,
+          requestHash,
+          cacheKey,
+          dataSource: "cache"
+        },
+        quota: {
+          todayRemaining: nearby.todayRemaining,
+          monthRemaining: nearby.monthRemaining,
+          googleTodayRemaining: nearby.googleTodayRemaining,
+          googleMonthRemaining: nearby.googleMonthRemaining
+        },
+        nearby,
+        facilities: buildCacheFacilities(cacheHit),
+        summary: buildCacheSummary(cacheHit)
+      });
+    }
+
     return fail(
       "NOT_IMPLEMENTED",
-      "Nearby facility lookup is not implemented in V1.4.1 skeleton.",
+      "Nearby facility lookup is not implemented in V1.4.3 cache lookup skeleton.",
       {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
@@ -380,12 +488,14 @@ export default async function handler(req, res) {
           addressMasked: maskAddress(address),
           radius,
           categories,
-          language: safeString(body.language) || "zh-TW",
-          region: safeString(body.region) || "TW"
+          language,
+          region
         },
         source: {
           cacheHit: false,
           googleApiCalled: false,
+          requestHash,
+          cacheKey,
           dataSource: "not_implemented"
         },
         quota: {
