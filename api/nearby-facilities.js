@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
 const RUNTIME_VERSION = "nearby-facilities-v1.4.3-cache-lookup-skeleton";
 const SOURCE = "nearby-facilities-api";
@@ -478,9 +479,20 @@ export default async function handler(req, res) {
       });
     }
 
+    const providerResult = await lookupGoogleNearbyFacilities({
+      storeId: safeString(store.store_id),
+      address,
+      radius,
+      categories,
+      language,
+      region,
+      requestHash,
+      cacheKey
+    });
+
     return fail(
-      "NOT_IMPLEMENTED",
-      "Nearby facility lookup is not implemented in V1.4.3 cache lookup skeleton.",
+      providerResult.reason,
+      providerResult.message,
       {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
@@ -493,10 +505,10 @@ export default async function handler(req, res) {
         },
         source: {
           cacheHit: false,
-          googleApiCalled: false,
+          googleApiCalled: providerResult.googleApiCalled === true,
           requestHash,
           cacheKey,
-          dataSource: "not_implemented"
+          dataSource: providerResult.dataSource || "not_implemented"
         },
         quota: {
           todayRemaining: nearby.todayRemaining,
@@ -504,7 +516,9 @@ export default async function handler(req, res) {
           googleTodayRemaining: nearby.googleTodayRemaining,
           googleMonthRemaining: nearby.googleMonthRemaining
         },
-        nearby
+        nearby,
+        facilities: providerResult.facilities || {},
+        summary: Array.isArray(providerResult.summary) ? providerResult.summary : []
       }
     );
   } catch (error) {
