@@ -1,338 +1,403 @@
+const RUNTIME_VERSION = "nearby-facilities-v1.4.1-skeleton";
+const SOURCE = "nearby-facilities-api";
+
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+}
+
+function safeString(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStoreId(value) {
+  return safeString(value).toUpperCase();
+}
+
+function makeRequestId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return value
+        .split(",")
+        .map((item) => safeString(item))
+        .filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function toBoolean(value) {
+  if (value === true || value === false) return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return false;
+}
+
+function toNumber(value, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function parseDate(value, endOfDay = false) {
+  const raw = safeString(value);
+  if (!raw) return null;
+
+  const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T${endOfDay ? "23:59:59" : "00:00:00"}+08:00`)
+    : new Date(raw);
+
+  return Number.isNaN(dateValue.getTime()) ? null : dateValue;
+}
+
+function getSupabaseConfig() {
+  const url = safeString(process.env.SUPABASE_URL).replace(/\/+$/, "");
+  const serviceRoleKey = safeString(process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  if (!url || !serviceRoleKey) return null;
+
+  return { url, serviceRoleKey };
+}
+
+async function supabaseSelect(config, table, query) {
+  const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
+    method: "GET",
+    headers: {
+      apikey: config.serviceRoleKey,
+      Authorization: `Bearer ${config.serviceRoleKey}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase ${table} query failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function fetchSingleByStoreId(config, table, storeId, select) {
+  const params = new URLSearchParams({
+    store_id: `eq.${storeId}`,
+    select,
+    limit: "1"
+  });
+
+  const rows = await supabaseSelect(config, table, params.toString());
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+function buildNearby(settings, quotaStatus) {
+  const enabled = toBoolean(settings.nearby_enabled);
+  const dailyQuota = toNumber(settings.daily_quota);
+  const monthlyQuota = toNumber(settings.monthly_quota);
+  const googleDailyQuota = toNumber(settings.google_daily_quota);
+  const googleMonthlyQuota = toNumber(settings.google_monthly_quota);
+
+  const todayUsed = toNumber(quotaStatus?.today_usage_count);
+  const monthUsed = toNumber(quotaStatus?.month_usage_count);
+  const googleTodayUsed = toNumber(quotaStatus?.today_google_api_count);
+  const googleMonthUsed = toNumber(quotaStatus?.month_google_api_count);
+
+  return {
+    enabled,
+    canSearchAddress: enabled,
+    status: enabled ? "ENABLED" : "DISABLED",
+    dailyQuota,
+    monthlyQuota,
+    todayUsed,
+    monthUsed,
+    todayRemaining: toNumber(
+      quotaStatus?.today_remaining,
+      Math.max(dailyQuota - todayUsed, 0)
+    ),
+    monthRemaining: toNumber(
+      quotaStatus?.month_remaining,
+      Math.max(monthlyQuota - monthUsed, 0)
+    ),
+    googleDailyQuota,
+    googleMonthlyQuota,
+    googleTodayUsed,
+    googleMonthUsed,
+    googleTodayRemaining: toNumber(
+      quotaStatus?.today_google_remaining,
+      Math.max(googleDailyQuota - googleTodayUsed, 0)
+    ),
+    googleMonthRemaining: toNumber(
+      quotaStatus?.month_google_remaining,
+      Math.max(googleMonthlyQuota - googleMonthUsed, 0)
+    ),
+    defaultRadius: toNumber(settings.default_radius, 1000),
+    allowedRadii: toArray(settings.allowed_radii).map((radius) => toNumber(radius)),
+    allowedCategories: toArray(settings.allowed_categories)
+  };
+}
+
+function maskAddress(address) {
+  const value = safeString(address);
+  if (!value) return "";
+  if (value.length <= 6) return "***";
+  return `${value.slice(0, 3)}***${value.slice(-3)}`;
+}
+
+function getRequestBody(req) {
+  if (typeof req.body === "string") return JSON.parse(req.body || "{}");
+  return req.body || {};
+}
+
+function getRequestedCategories(body, nearby) {
+  const rawCategories = toArray(body.categories);
+  const allowedCategories = nearby.allowedCategories;
+
+  if (rawCategories.length === 0) return allowedCategories;
+
+  return [...new Set(rawCategories.map((category) => safeString(category)).filter(Boolean))];
+}
+
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({
+  setCors(res);
+
+  const requestId = makeRequestId();
+
+  const fail = (reason, message, extra = {}) => {
+    return res.status(200).json({
       success: false,
-      error: "METHOD_NOT_ALLOWED",
-      message: "Only POST method is allowed.",
-      facilities: []
+      reason,
+      message,
+      source: SOURCE,
+      runtimeVersion: RUNTIME_VERSION,
+      requestId,
+      facilities: {},
+      summary: [],
+      ...extra
     });
+  };
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST") {
+    return fail("METHOD_NOT_ALLOWED", "Only POST is allowed.");
   }
 
   try {
-    const { address, lat, lng, radius = 500, categories = [] } = req.body || {};
+    const config = getSupabaseConfig();
 
-    if (!address || typeof lat !== "number" || typeof lng !== "number") {
-      return res.status(400).json({
-        success: false,
-        error: "INVALID_INPUT",
-        message: "請提供 address、lat、lng。",
-        facilities: []
+    if (!config) {
+      return fail("SUPABASE_CONFIG_MISSING", "Server configuration is missing.");
+    }
+
+    const body = getRequestBody(req);
+    const storeId = normalizeStoreId(
+      body.storeId ||
+        body.storeCode ||
+        body.store ||
+        body.storeNo ||
+        body.id
+    );
+    const accessCode = safeString(
+      body.accessCode ||
+        body.verifyCode ||
+        body.verificationCode ||
+        body.authCode ||
+        body.password ||
+        body.code
+    );
+
+    if (!storeId || !accessCode) {
+      return fail("MISSING_INPUT", "Store id and access code are required.", {
+        storeId: storeId || null
       });
     }
 
-    const safeRadius = Math.min(Math.max(Number(radius) || 500, 100), 500);
+    const store = await fetchSingleByStoreId(
+      config,
+      "stores",
+      storeId,
+      [
+        "store_id",
+        "store_name",
+        "access_code",
+        "active",
+        "start_at",
+        "expires_at"
+      ].join(",")
+    );
 
-const allowedCategories = ["school", "transport", "shopping", "park", "medical"];
+    if (!store) {
+      return fail("STORE_NOT_FOUND", "Store was not found.", { storeId });
+    }
 
-const rawCategories = Array.isArray(categories) && categories.length > 0
-  ? categories
-  : allowedCategories;
+    if (safeString(store.access_code) !== accessCode) {
+      return fail("INVALID_CODE", "Invalid access code.", { storeId });
+    }
 
-const safeCategories = [...new Set(rawCategories)]
-  .filter((category) => allowedCategories.includes(category))
-  .slice(0, 5);
+    if (store.active !== true) {
+      return fail("STORE_DISABLED", "Store is disabled.", { storeId });
+    }
 
-if (safeCategories.length === 0) {
-  return res.status(400).json({
-    success: false,
-    error: "NO_CATEGORIES",
-    message: "請至少提供一個有效查詢類別。支援 school、transport、shopping、park、medical。",
-    facilities: []
-  });
-}
-    const categoryMap = {
-      school: `
-        node["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
-        way["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
-        relation["amenity"~"school|kindergarten|college|university"](around:${safeRadius},${lat},${lng});
-      `,
-      transport: `
-        node["highway"="bus_stop"](around:${safeRadius},${lat},${lng});
-        node["railway"~"station|halt"](around:${safeRadius},${lat},${lng});
-        way["railway"~"station|halt"](around:${safeRadius},${lat},${lng});
-      `,
-      shopping: `
-        node["shop"](around:${safeRadius},${lat},${lng});
-        way["shop"](around:${safeRadius},${lat},${lng});
-        node["amenity"~"marketplace|supermarket"](around:${safeRadius},${lat},${lng});
-        way["amenity"~"marketplace|supermarket"](around:${safeRadius},${lat},${lng});
-      `,
-      park: `
-        node["leisure"="park"](around:${safeRadius},${lat},${lng});
-        way["leisure"="park"](around:${safeRadius},${lat},${lng});
-        relation["leisure"="park"](around:${safeRadius},${lat},${lng});
-      `,
-      medical: `
-        node["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
-        way["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
-        relation["amenity"~"hospital|clinic|doctors|pharmacy"](around:${safeRadius},${lat},${lng});
-      `
-    };
+    const now = new Date();
+    const startAtDate = parseDate(store.start_at, false);
+    const expiresAtDate = parseDate(store.expires_at, true);
 
-    const queryParts = safeCategories
-      .map((cat) => categoryMap[cat])
-      .filter(Boolean)
-      .join("\n");
+    if (startAtDate && now < startAtDate) {
+      return fail("NOT_STARTED", "Store access has not started.", { storeId });
+    }
 
-    if (!queryParts) {
-      return res.status(400).json({
-        success: false,
-        error: "UNSUPPORTED_CATEGORY",
-        message: "查詢類別不支援，請使用 school、transport、shopping、park、medical。",
-        facilities: []
+    if (expiresAtDate && now > expiresAtDate) {
+      return fail("EXPIRED", "Store access has expired.", { storeId });
+    }
+
+    const settings = await fetchSingleByStoreId(
+      config,
+      "nearby_store_settings",
+      storeId,
+      [
+        "store_id",
+        "nearby_enabled",
+        "daily_quota",
+        "monthly_quota",
+        "allowed_radii",
+        "default_radius",
+        "allowed_categories",
+        "google_daily_quota",
+        "google_monthly_quota"
+      ].join(",")
+    );
+
+    if (!settings) {
+      return fail("NEARBY_SETTINGS_NOT_FOUND", "Nearby store settings were not found.", {
+        storeId
       });
     }
 
-    const overpassQuery = `
-[out:json][timeout:8];
-(
-${queryParts}
-);
-out center;
-`;
+    const quotaStatus = await fetchSingleByStoreId(
+      config,
+      "nearby_store_quota_status",
+      storeId,
+      [
+        "store_id",
+        "today_usage_count",
+        "month_usage_count",
+        "today_remaining",
+        "month_remaining",
+        "today_google_api_count",
+        "month_google_api_count",
+        "today_google_remaining",
+        "month_google_remaining"
+      ].join(",")
+    );
 
-    let overpassData = null;
-    let lastOverpassError = null;
+    const nearby = buildNearby(settings, quotaStatus);
 
-    const overpassEndpoints = [
-      "https://overpass.private.coffee/api/interpreter",
-      "https://overpass-api.de/api/interpreter"
-    ];
-
-    for (const endpoint of overpassEndpoints) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "Accept": "*/*",
-            "User-Agent": "real-estate-nearby-api/1.0 (https://jinjhan-hub.github.io/real-estate-gpt-knowledge/privacy-policy.html)",
-            "Referer": "https://jinjhan-hub.github.io/real-estate-gpt-knowledge/privacy-policy.html"
-          },
-          body: "data=" + encodeURIComponent(overpassQuery),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-
-          lastOverpassError = {
-            endpoint,
-            status: response.status,
-            statusText: response.statusText,
-            body: errorText.slice(0, 300)
-          };
-
-          continue;
+    if (!nearby.enabled) {
+      return fail(
+        "NEARBY_DISABLED",
+        "Nearby search is disabled for this store.",
+        {
+          storeId: safeString(store.store_id),
+          storeName: safeString(store.store_name),
+          nearby
         }
-
-        overpassData = await response.json();
-        break;
-
-      } catch (error) {
-        clearTimeout(timeoutId);
-
-        lastOverpassError = {
-          endpoint,
-          status: "FETCH_FAILED",
-          statusText: error.name || "FetchError",
-          body: error.message || "Overpass request failed"
-        };
-
-        continue;
-      }
+      );
     }
 
-    if (!overpassData) {
-      return res.status(200).json({
-        success: false,
-        error: "OVERPASS_ERROR",
-        message: "Overpass API 回應失敗，請縮小半徑或稍後再試。",
-        overpassEndpoint: lastOverpassError?.endpoint || null,
-        overpassStatus: lastOverpassError?.status || null,
-        overpassStatusText: lastOverpassError?.statusText || null,
-        overpassBody: lastOverpassError?.body || null,
-        query: {
-          address,
-          lat,
-          lng,
-          radius: safeRadius,
-          categories: safeCategories
-        },
-        facilities: [],
-        summary: buildFacilitySummary([], safeRadius)
+    const address = safeString(body.address);
+
+    if (!address) {
+      return fail("MISSING_ADDRESS", "Address is required.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby
       });
     }
 
-    const facilities = [];
-
-    for (const item of overpassData.elements || []) {
-  const name = item.tags?.name;
-  if (!name) continue;
-
-  const itemLat = item.lat || item.center?.lat;
-  const itemLng = item.lon || item.center?.lon;
-
-  if (!itemLat || !itemLng) continue;
-
-  const distanceMeters = Math.round(getDistanceMeters(lat, lng, itemLat, itemLng));
-
-  if (distanceMeters > safeRadius) continue;
-
-  const category = detectCategory(item.tags);
-
-  facilities.push({
-    category,
-    name,
-    distance_meters: distanceMeters,
-    lat: itemLat,
-    lng: itemLng
-  });
-}
-
-    const uniqueFacilities = [];
-    const seen = new Set();
-
-    for (const item of facilities) {
-      const key = `${item.category}-${item.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniqueFacilities.push(item);
+    if (address.length < 4) {
+      return fail("INVALID_ADDRESS", "Address is too short.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby
+      });
     }
 
-    const limitedFacilities = [];
+    const radius = toNumber(body.radius, nearby.defaultRadius);
 
-    for (const cat of safeCategories) {
-      const group = uniqueFacilities
-        .filter((item) => item.category === cat)
-        .sort((a, b) => a.distance_meters - b.distance_meters)
-        .slice(0, 5);
-
-      limitedFacilities.push(...group);
+    if (!nearby.allowedRadii.includes(radius)) {
+      return fail("INVALID_RADIUS", "Radius is not allowed for this store.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby,
+        allowedRadii: nearby.allowedRadii
+      });
     }
 
-    const summary = buildFacilitySummary(limitedFacilities, safeRadius);
+    const categories = getRequestedCategories(body, nearby);
+    const invalidCategories = categories.filter(
+      (category) => !nearby.allowedCategories.includes(category)
+    );
 
-    return res.status(200).json({
-      success: true,
-      query: {
-        address,
-        lat,
-        lng,
-        radius: safeRadius,
-        categories: safeCategories
-      },
-      facilities: limitedFacilities,
-      summary,
-      note: limitedFacilities.length > 0
-        ? "查詢完成。距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。"
-        : "查詢完成，但指定範圍內未取得符合條件的設施資料。"
-    });
+    if (categories.length === 0 || invalidCategories.length > 0) {
+      return fail("INVALID_CATEGORY", "One or more categories are not allowed.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby,
+        allowedCategories: nearby.allowedCategories
+      });
+    }
 
+    if (nearby.todayRemaining <= 0 || nearby.monthRemaining <= 0) {
+      return fail("QUERY_QUOTA_EXCEEDED", "Store query quota has been exhausted.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby
+      });
+    }
+
+    if (nearby.googleTodayRemaining <= 0 || nearby.googleMonthRemaining <= 0) {
+      return fail("GOOGLE_QUOTA_EXCEEDED", "Store Google API quota has been exhausted.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        nearby
+      });
+    }
+
+    return fail(
+      "NOT_IMPLEMENTED",
+      "Nearby facility lookup is not implemented in V1.4.1 skeleton.",
+      {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        query: {
+          addressMasked: maskAddress(address),
+          radius,
+          categories,
+          language: safeString(body.language) || "zh-TW",
+          region: safeString(body.region) || "TW"
+        },
+        source: {
+          cacheHit: false,
+          googleApiCalled: false,
+          dataSource: "not_implemented"
+        },
+        quota: {
+          todayRemaining: nearby.todayRemaining,
+          monthRemaining: nearby.monthRemaining,
+          googleTodayRemaining: nearby.googleTodayRemaining,
+          googleMonthRemaining: nearby.googleMonthRemaining
+        },
+        nearby
+      }
+    );
   } catch (error) {
-    return res.status(200).json({
-      success: false,
-      error: "SERVER_ERROR",
-      message: "伺服器處理失敗，請稍後再試。",
-      detail: error.message || "Unknown server error",
-      facilities: [],
-      summary: "周邊機能查詢失敗，請稍後再試，或縮小查詢半徑、減少查詢分類。"
-    });
+    return fail("SERVER_ERROR", "Nearby facility request failed.");
   }
-}
-
-function detectCategory(tags = {}) {
-  if (tags.amenity) {
-    if (["school", "kindergarten", "college", "university"].includes(tags.amenity)) {
-      return "school";
-    }
-
-    if (["hospital", "clinic", "doctors", "pharmacy"].includes(tags.amenity)) {
-      return "medical";
-    }
-
-    if (["marketplace", "supermarket"].includes(tags.amenity)) {
-      return "shopping";
-    }
-  }
-
-  if (tags.highway === "bus_stop" || tags.railway) {
-    return "transport";
-  }
-
-  if (tags.shop) {
-    return "shopping";
-  }
-
-  if (tags.leisure === "park") {
-    return "park";
-  }
-
-  return "other";
-}
-
-function getDistanceMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = (value) => (value * Math.PI) / 180;
-
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
-function buildFacilitySummary(facilities, radius) {
-  if (!facilities || facilities.length === 0) {
-    return `周邊機能｜${radius} 公尺內
-
-指定範圍內未取得符合條件的設施資料。
-
-備註：查詢結果依 OpenStreetMap / Overpass API 資料回傳，若資料不足，請以 Google Maps 或實地查證為準。`;
-  }
-
-  const categoryLabels = {
-    transport: "交通機能",
-    shopping: "採買機能",
-    school: "學校機能",
-    park: "公園綠地",
-    medical: "醫療機能",
-    other: "其他機能"
-  };
-
-  const grouped = {};
-
-  for (const item of facilities) {
-    const category = item.category || "other";
-    if (!grouped[category]) grouped[category] = [];
-    grouped[category].push(item);
-  }
-
-  const lines = [`周邊機能｜${radius} 公尺內`, ""];
-
-  for (const [category, items] of Object.entries(grouped)) {
-    lines.push(categoryLabels[category] || category);
-
-    for (const item of items) {
-      lines.push(`・${item.name}｜約 ${item.distance_meters} 公尺`);
-    }
-
-    lines.push("");
-  }
-
-  lines.push("備註：距離為系統依座標估算之直線距離，實際路程仍以地圖導航為準。");
-
-  return lines.join("\n");
 }
