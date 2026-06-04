@@ -59,6 +59,12 @@ create table if not exists nearby_usage_logs (
   result_source text not null default 'google',
   cache_hit boolean not null default false,
   cache_key text,
+  request_hash text,
+  api_called boolean not null default false,
+  api_name text,
+  estimated_cost_tier text,
+  note text,
+  error_message text,
   facility_count_total integer not null default 0,
   status text not null default 'success',
   error_code text,
@@ -70,6 +76,17 @@ create table if not exists nearby_usage_logs (
     check (facility_count_total >= 0),
   constraint nearby_usage_logs_result_source_allowed
     check (result_source in ('cache', 'google', 'mixed', 'error')),
+  constraint nearby_usage_logs_estimated_cost_tier_allowed
+    check (
+      estimated_cost_tier is null
+        or estimated_cost_tier in (
+          'free_cache',
+          'basic',
+          'standard',
+          'advanced',
+          'unknown'
+        )
+    ),
   constraint nearby_usage_logs_status_allowed
     check (
       status in (
@@ -94,7 +111,10 @@ create table if not exists nearby_cache (
   result_json jsonb not null default '[]'::jsonb,
   result_count integer not null default 0,
   source text not null default 'google_places',
+  request_hash text,
   expires_at timestamptz,
+  last_hit_at timestamptz,
+  hit_count integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint nearby_cache_cache_key_unique unique (cache_key),
@@ -102,6 +122,8 @@ create table if not exists nearby_cache (
     check (radius > 0),
   constraint nearby_cache_result_count_nonnegative
     check (result_count >= 0),
+  constraint nearby_cache_hit_count_nonnegative
+    check (hit_count >= 0),
   constraint nearby_cache_category_allowed
     check (category in ('park', 'school', 'shopping', 'transport', 'medical'))
 );
@@ -114,11 +136,27 @@ create table if not exists nearby_google_api_usage_logs (
   category text,
   radius integer,
   cache_key text,
+  request_hash text,
+  api_called boolean not null default true,
   status text not null default 'success',
   cost_unit integer not null default 1,
+  estimated_cost_tier text,
+  error_message text,
+  note text,
   created_at timestamptz not null default now(),
   constraint nearby_google_api_usage_logs_cost_unit_nonnegative
     check (cost_unit >= 0),
+  constraint nearby_google_api_usage_logs_estimated_cost_tier_allowed
+    check (
+      estimated_cost_tier is null
+        or estimated_cost_tier in (
+          'free_cache',
+          'basic',
+          'standard',
+          'advanced',
+          'unknown'
+        )
+    ),
   constraint nearby_google_api_usage_logs_google_api_allowed
     check (
       google_api in (
@@ -174,8 +212,26 @@ create index if not exists nearby_usage_logs_request_id_idx
 create index if not exists nearby_usage_logs_cache_key_idx
   on nearby_usage_logs(cache_key);
 
+create index if not exists nearby_usage_logs_request_hash_idx
+  on nearby_usage_logs(request_hash);
+
+create index if not exists nearby_usage_logs_request_hash_created_at_idx
+  on nearby_usage_logs(request_hash, created_at);
+
+create index if not exists nearby_usage_logs_api_called_created_at_idx
+  on nearby_usage_logs(api_called, created_at);
+
+create index if not exists nearby_usage_logs_status_created_at_idx
+  on nearby_usage_logs(status, created_at);
+
 create index if not exists nearby_cache_cache_key_idx
   on nearby_cache(cache_key);
+
+create index if not exists nearby_cache_request_hash_idx
+  on nearby_cache(request_hash);
+
+create index if not exists nearby_cache_request_hash_expires_at_idx
+  on nearby_cache(request_hash, expires_at);
 
 create index if not exists nearby_cache_query_radius_category_idx
   on nearby_cache(query_address_normalized, radius, category);
@@ -188,6 +244,18 @@ create index if not exists nearby_google_api_usage_logs_store_id_created_at_idx
 
 create index if not exists nearby_google_api_usage_logs_request_id_idx
   on nearby_google_api_usage_logs(request_id);
+
+create index if not exists nearby_google_api_usage_logs_request_hash_idx
+  on nearby_google_api_usage_logs(request_hash);
+
+create index if not exists nearby_google_api_usage_logs_api_called_created_at_idx
+  on nearby_google_api_usage_logs(api_called, created_at);
+
+create index if not exists nearby_google_api_usage_logs_status_created_at_idx
+  on nearby_google_api_usage_logs(status, created_at);
+
+create index if not exists nearby_google_api_usage_logs_google_api_created_at_idx
+  on nearby_google_api_usage_logs(google_api, created_at);
 
 create index if not exists nearby_generated_outputs_store_id_created_at_idx
   on nearby_generated_outputs(store_id, created_at);
@@ -212,6 +280,9 @@ for each row
 execute function set_nearby_updated_at();
 
 -- V1.0 view drafts. These are migration draft definitions only and were not executed.
+-- request_hash supports cache-first lookup and avoiding duplicate Google API calls
+-- for the same normalized request within a 24-hour cache window.
+-- nearby_google_api_usage_logs.google_api is the canonical API name field.
 
 create or replace view nearby_store_usage_summary as
 with usage_agg as (
@@ -235,6 +306,21 @@ with usage_agg as (
     count(*) filter (
       where cache_hit = true
     ) as total_cache_count,
+    count(*) filter (
+      where api_called = true
+        and created_at >= date_trunc('day', now())
+    ) as today_api_called_count,
+    count(*) filter (
+      where api_called = true
+        and created_at >= date_trunc('month', now())
+    ) as month_api_called_count,
+    count(*) filter (
+      where api_called = true
+    ) as total_api_called_count,
+    max(created_at) filter (
+      where status <> 'success'
+        or error_message is not null
+    ) as last_error_at,
     max(created_at) as last_used_at
   from nearby_usage_logs
   group by store_id
@@ -243,16 +329,24 @@ google_agg as (
   select
     store_id,
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('day', now())
     ) as today_google_api_count,
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('month', now())
     ) as month_google_api_count,
     count(*) filter (
-      where status = 'success'
-    ) as total_google_api_count
+      where api_called = true
+    ) as total_google_api_count,
+    count(*) filter (
+      where status in ('blocked_quota', 'blocked_config')
+        and created_at >= date_trunc('day', now())
+    ) as today_google_blocked_count,
+    count(*) filter (
+      where status in ('blocked_quota', 'blocked_config')
+        and created_at >= date_trunc('month', now())
+    ) as month_google_blocked_count
   from nearby_google_api_usage_logs
   group by store_id
 )
@@ -265,9 +359,15 @@ select
   coalesce(ua.today_cache_count, 0) as today_cache_count,
   coalesce(ua.month_cache_count, 0) as month_cache_count,
   coalesce(ua.total_cache_count, 0) as total_cache_count,
+  coalesce(ua.today_api_called_count, 0) as today_api_called_count,
+  coalesce(ua.month_api_called_count, 0) as month_api_called_count,
+  coalesce(ua.total_api_called_count, 0) as total_api_called_count,
   coalesce(ga.today_google_api_count, 0) as today_google_api_count,
   coalesce(ga.month_google_api_count, 0) as month_google_api_count,
   coalesce(ga.total_google_api_count, 0) as total_google_api_count,
+  coalesce(ga.today_google_blocked_count, 0) as today_google_blocked_count,
+  coalesce(ga.month_google_blocked_count, 0) as month_google_blocked_count,
+  ua.last_error_at,
   ua.last_used_at
 from stores s
 left join usage_agg ua
@@ -293,11 +393,11 @@ google_agg as (
   select
     store_id,
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('day', now())
     ) as today_google_api_count,
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('month', now())
     ) as month_google_api_count
   from nearby_google_api_usage_logs
@@ -360,19 +460,35 @@ with usage_agg as (
     count(*) filter (
       where cache_hit = true
         and created_at >= date_trunc('month', now())
-    ) as month_cache_hits
+    ) as month_cache_hits,
+    count(*) filter (
+      where api_called = true
+        and created_at >= date_trunc('day', now())
+    ) as today_api_called_count,
+    count(*) filter (
+      where api_called = true
+        and created_at >= date_trunc('month', now())
+    ) as month_api_called_count
   from nearby_usage_logs
 ),
 google_agg as (
   select
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('day', now())
     ) as today_google_api_calls,
     count(*) filter (
-      where status = 'success'
+      where api_called = true
         and created_at >= date_trunc('month', now())
-    ) as month_google_api_calls
+    ) as month_google_api_calls,
+    count(*) filter (
+      where status = 'blocked_quota'
+        and created_at >= date_trunc('day', now())
+    ) as today_blocked_quota_count,
+    count(*) filter (
+      where status = 'blocked_quota'
+        and created_at >= date_trunc('month', now())
+    ) as month_blocked_quota_count
   from nearby_google_api_usage_logs
 )
 select
@@ -382,6 +498,12 @@ select
   coalesce(ga.month_google_api_calls, 0) as month_google_api_calls,
   coalesce(ua.today_cache_hits, 0) as today_cache_hits,
   coalesce(ua.month_cache_hits, 0) as month_cache_hits,
+  coalesce(ua.today_cache_hits, 0) as today_cache_hit_count,
+  coalesce(ua.month_cache_hits, 0) as month_cache_hit_count,
+  coalesce(ua.today_api_called_count, 0) as today_api_called_count,
+  coalesce(ua.month_api_called_count, 0) as month_api_called_count,
+  coalesce(ga.today_blocked_quota_count, 0) as today_blocked_quota_count,
+  coalesce(ga.month_blocked_quota_count, 0) as month_blocked_quota_count,
   null::integer as system_google_daily_quota,
   null::integer as system_google_monthly_quota,
   null::integer as system_google_daily_remaining,
