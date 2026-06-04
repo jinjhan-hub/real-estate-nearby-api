@@ -155,6 +155,18 @@ function normalizeAddress(address) {
   return safeString(address).replace(/\s+/g, " ");
 }
 
+function isCompleteStreetAddress(address) {
+  const value = safeString(address);
+
+  return (
+    value &&
+    /[縣市]/.test(value) &&
+    /[鄉鎮市區]/.test(value) &&
+    /[路街段巷弄]/.test(value) &&
+    value.includes("號")
+  );
+}
+
 function getRequestBody(req) {
   if (typeof req.body === "string") return JSON.parse(req.body || "{}");
   return req.body || {};
@@ -379,6 +391,23 @@ export default async function handler(req, res) {
         storeName: safeString(store.store_name),
         nearby
       });
+    }
+
+    if (!isCompleteStreetAddress(address)) {
+      return fail(
+        "INCOMPLETE_ADDRESS",
+        "請輸入包含門牌號碼的完整地址，例如：彰化縣員林市○○路○○號。",
+        {
+          storeId: safeString(store.store_id),
+          storeName: safeString(store.store_name),
+          nearby,
+          source: {
+            cacheHit: false,
+            googleApiCalled: false,
+            dataSource: "invalid_address"
+          }
+        }
+      );
     }
 
     if (address.length < 4) {
