@@ -519,7 +519,13 @@ export default async function handler(req, res) {
           googleApiCalled: providerResult.googleApiCalled === true,
           requestHash,
           cacheKey,
-          dataSource: providerResult.dataSource || "google_places"
+          dataSource: providerResult.dataSource || "google_places",
+          googleErrorStage: providerResult.googleErrorStage || null,
+          googleHttpStatus: Number.isInteger(providerResult.googleHttpStatus)
+            ? providerResult.googleHttpStatus
+            : null,
+          googleErrorStatus: providerResult.googleErrorStatus || null,
+          googleErrorCode: providerResult.googleErrorCode || null
         },
         quota: {
           todayRemaining: nearby.todayRemaining,
@@ -551,7 +557,13 @@ export default async function handler(req, res) {
           googleApiCalled: providerResult.googleApiCalled === true,
           requestHash,
           cacheKey,
-          dataSource: providerResult.dataSource || "not_implemented"
+          dataSource: providerResult.dataSource || "not_implemented",
+          googleErrorStage: providerResult.googleErrorStage || null,
+          googleHttpStatus: Number.isInteger(providerResult.googleHttpStatus)
+            ? providerResult.googleHttpStatus
+            : null,
+          googleErrorStatus: providerResult.googleErrorStatus || null,
+          googleErrorCode: providerResult.googleErrorCode || null
         },
         quota: {
           todayRemaining: nearby.todayRemaining,
