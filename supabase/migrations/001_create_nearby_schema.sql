@@ -56,7 +56,7 @@ create table if not exists nearby_usage_logs (
   lng numeric(10,7),
   radius integer not null default 1000,
   categories text[] not null default array[]::text[],
-  result_source text not null default 'unknown',
+  result_source text not null default 'google',
   cache_hit boolean not null default false,
   cache_key text,
   facility_count_total integer not null default 0,
@@ -69,9 +69,17 @@ create table if not exists nearby_usage_logs (
   constraint nearby_usage_logs_facility_count_nonnegative
     check (facility_count_total >= 0),
   constraint nearby_usage_logs_result_source_allowed
-    check (result_source in ('cache', 'google', 'mixed', 'error', 'unknown')),
+    check (result_source in ('cache', 'google', 'mixed', 'error')),
   constraint nearby_usage_logs_status_allowed
-    check (status in ('success', 'failed', 'blocked_quota', 'blocked_auth'))
+    check (
+      status in (
+        'success',
+        'failed',
+        'blocked_quota',
+        'blocked_auth',
+        'blocked_config'
+      )
+    )
 );
 
 create table if not exists nearby_cache (
@@ -125,9 +133,11 @@ create table if not exists nearby_google_api_usage_logs (
       status in (
         'success',
         'failed',
-        'skipped_cache',
         'blocked_quota',
-        'disabled'
+        'blocked_config',
+        'timeout',
+        'rate_limited',
+        'skipped_cache'
       )
     )
 );
@@ -204,146 +214,180 @@ execute function set_nearby_updated_at();
 -- V1.0 view drafts. These are migration draft definitions only and were not executed.
 
 create or replace view nearby_store_usage_summary as
+with usage_agg as (
+  select
+    store_id,
+    count(*) filter (
+      where created_at >= date_trunc('day', now())
+    ) as today_usage_count,
+    count(*) filter (
+      where created_at >= date_trunc('month', now())
+    ) as month_usage_count,
+    count(*) as total_usage_count,
+    count(*) filter (
+      where cache_hit = true
+        and created_at >= date_trunc('day', now())
+    ) as today_cache_count,
+    count(*) filter (
+      where cache_hit = true
+        and created_at >= date_trunc('month', now())
+    ) as month_cache_count,
+    count(*) filter (
+      where cache_hit = true
+    ) as total_cache_count,
+    max(created_at) as last_used_at
+  from nearby_usage_logs
+  group by store_id
+),
+google_agg as (
+  select
+    store_id,
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('day', now())
+    ) as today_google_api_count,
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('month', now())
+    ) as month_google_api_count,
+    count(*) filter (
+      where status = 'success'
+    ) as total_google_api_count
+  from nearby_google_api_usage_logs
+  group by store_id
+)
 select
   s.store_id,
   s.store_name,
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('day', now())
-  ) as today_usage_count,
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('month', now())
-  ) as month_usage_count,
-  count(ul.id) as total_usage_count,
-  count(ul.id) filter (
-    where ul.cache_hit = true
-      and ul.created_at >= date_trunc('day', now())
-  ) as today_cache_count,
-  count(ul.id) filter (
-    where ul.cache_hit = true
-      and ul.created_at >= date_trunc('month', now())
-  ) as month_cache_count,
-  count(ul.id) filter (
-    where ul.cache_hit = true
-  ) as total_cache_count,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('day', now())
-  ) as today_google_api_count,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('month', now())
-  ) as month_google_api_count,
-  count(ga.id) filter (
-    where ga.status = 'success'
-  ) as total_google_api_count,
-  max(ul.created_at) as last_used_at
+  coalesce(ua.today_usage_count, 0) as today_usage_count,
+  coalesce(ua.month_usage_count, 0) as month_usage_count,
+  coalesce(ua.total_usage_count, 0) as total_usage_count,
+  coalesce(ua.today_cache_count, 0) as today_cache_count,
+  coalesce(ua.month_cache_count, 0) as month_cache_count,
+  coalesce(ua.total_cache_count, 0) as total_cache_count,
+  coalesce(ga.today_google_api_count, 0) as today_google_api_count,
+  coalesce(ga.month_google_api_count, 0) as month_google_api_count,
+  coalesce(ga.total_google_api_count, 0) as total_google_api_count,
+  ua.last_used_at
 from stores s
-left join nearby_usage_logs ul
-  on ul.store_id = s.store_id
-left join nearby_google_api_usage_logs ga
+left join usage_agg ua
+  on ua.store_id = s.store_id
+left join google_agg ga
   on ga.store_id = s.store_id
-group by s.store_id, s.store_name;
+;
 
 create or replace view nearby_store_quota_status as
+with usage_agg as (
+  select
+    store_id,
+    count(*) filter (
+      where created_at >= date_trunc('day', now())
+    ) as today_usage_count,
+    count(*) filter (
+      where created_at >= date_trunc('month', now())
+    ) as month_usage_count
+  from nearby_usage_logs
+  group by store_id
+),
+google_agg as (
+  select
+    store_id,
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('day', now())
+    ) as today_google_api_count,
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('month', now())
+    ) as month_google_api_count
+  from nearby_google_api_usage_logs
+  group by store_id
+)
 select
   s.store_id,
   s.store_name,
   coalesce(nss.nearby_enabled, false) as nearby_enabled,
   coalesce(nss.daily_quota, 0) as daily_quota,
   coalesce(nss.monthly_quota, 0) as monthly_quota,
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('day', now())
-  ) as today_usage_count,
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('month', now())
-  ) as month_usage_count,
+  coalesce(ua.today_usage_count, 0) as today_usage_count,
+  coalesce(ua.month_usage_count, 0) as month_usage_count,
   greatest(
     coalesce(nss.daily_quota, 0)
-      - count(ul.id) filter (
-          where ul.created_at >= date_trunc('day', now())
-        ),
+      - coalesce(ua.today_usage_count, 0),
     0
   ) as today_remaining,
   greatest(
     coalesce(nss.monthly_quota, 0)
-      - count(ul.id) filter (
-          where ul.created_at >= date_trunc('month', now())
-        ),
+      - coalesce(ua.month_usage_count, 0),
     0
   ) as month_remaining,
   coalesce(nss.google_daily_quota, 0) as google_daily_quota,
   coalesce(nss.google_monthly_quota, 0) as google_monthly_quota,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('day', now())
-  ) as today_google_api_count,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('month', now())
-  ) as month_google_api_count,
+  coalesce(ga.today_google_api_count, 0) as today_google_api_count,
+  coalesce(ga.month_google_api_count, 0) as month_google_api_count,
   greatest(
     coalesce(nss.google_daily_quota, 0)
-      - count(ga.id) filter (
-          where ga.status = 'success'
-            and ga.created_at >= date_trunc('day', now())
-        ),
+      - coalesce(ga.today_google_api_count, 0),
     0
   ) as today_google_remaining,
   greatest(
     coalesce(nss.google_monthly_quota, 0)
-      - count(ga.id) filter (
-          where ga.status = 'success'
-            and ga.created_at >= date_trunc('month', now())
-        ),
+      - coalesce(ga.month_google_api_count, 0),
     0
   ) as month_google_remaining
 from stores s
 left join nearby_store_settings nss
   on nss.store_id = s.store_id
-left join nearby_usage_logs ul
-  on ul.store_id = s.store_id
-left join nearby_google_api_usage_logs ga
+left join usage_agg ua
+  on ua.store_id = s.store_id
+left join google_agg ga
   on ga.store_id = s.store_id
-group by
-  s.store_id,
-  s.store_name,
-  nss.nearby_enabled,
-  nss.daily_quota,
-  nss.monthly_quota,
-  nss.google_daily_quota,
-  nss.google_monthly_quota;
+;
 
 create or replace view nearby_system_usage_summary as
+with usage_agg as (
+  select
+    count(*) filter (
+      where created_at >= date_trunc('day', now())
+    ) as today_total_queries,
+    count(*) filter (
+      where created_at >= date_trunc('month', now())
+    ) as month_total_queries,
+    count(*) filter (
+      where cache_hit = true
+        and created_at >= date_trunc('day', now())
+    ) as today_cache_hits,
+    count(*) filter (
+      where cache_hit = true
+        and created_at >= date_trunc('month', now())
+    ) as month_cache_hits
+  from nearby_usage_logs
+),
+google_agg as (
+  select
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('day', now())
+    ) as today_google_api_calls,
+    count(*) filter (
+      where status = 'success'
+        and created_at >= date_trunc('month', now())
+    ) as month_google_api_calls
+  from nearby_google_api_usage_logs
+)
 select
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('day', now())
-  ) as today_total_queries,
-  count(ul.id) filter (
-    where ul.created_at >= date_trunc('month', now())
-  ) as month_total_queries,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('day', now())
-  ) as today_google_api_calls,
-  count(ga.id) filter (
-    where ga.status = 'success'
-      and ga.created_at >= date_trunc('month', now())
-  ) as month_google_api_calls,
-  count(ul.id) filter (
-    where ul.cache_hit = true
-      and ul.created_at >= date_trunc('day', now())
-  ) as today_cache_hits,
-  count(ul.id) filter (
-    where ul.cache_hit = true
-      and ul.created_at >= date_trunc('month', now())
-  ) as month_cache_hits,
+  coalesce(ua.today_total_queries, 0) as today_total_queries,
+  coalesce(ua.month_total_queries, 0) as month_total_queries,
+  coalesce(ga.today_google_api_calls, 0) as today_google_api_calls,
+  coalesce(ga.month_google_api_calls, 0) as month_google_api_calls,
+  coalesce(ua.today_cache_hits, 0) as today_cache_hits,
+  coalesce(ua.month_cache_hits, 0) as month_cache_hits,
   null::integer as system_google_daily_quota,
   null::integer as system_google_monthly_quota,
   null::integer as system_google_daily_remaining,
   null::integer as system_google_monthly_remaining
-from nearby_usage_logs ul
-full join nearby_google_api_usage_logs ga
-  on ga.request_id = ul.request_id;
+from usage_agg ua
+cross join google_agg ga;
 
 -- RLS is intentionally not enabled in V1.0.
 -- RLS should be planned after the API permission model is confirmed.
