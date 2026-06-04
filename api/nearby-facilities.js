@@ -497,6 +497,42 @@ export default async function handler(req, res) {
       }
     });
 
+    if (providerResult.success === true) {
+      return res.status(200).json({
+        success: true,
+        reason: providerResult.reason,
+        message: providerResult.message,
+        apiSource: SOURCE,
+        runtimeVersion: RUNTIME_VERSION,
+        requestId,
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        query: {
+          addressMasked: maskAddress(address),
+          radius,
+          categories,
+          language,
+          region
+        },
+        source: {
+          cacheHit: false,
+          googleApiCalled: providerResult.googleApiCalled === true,
+          requestHash,
+          cacheKey,
+          dataSource: providerResult.dataSource || "google_places"
+        },
+        quota: {
+          todayRemaining: nearby.todayRemaining,
+          monthRemaining: nearby.monthRemaining,
+          googleTodayRemaining: nearby.googleTodayRemaining,
+          googleMonthRemaining: nearby.googleMonthRemaining
+        },
+        nearby,
+        facilities: providerResult.facilities || {},
+        summary: Array.isArray(providerResult.summary) ? providerResult.summary : []
+      });
+    }
+
     return fail(
       providerResult.reason,
       providerResult.message,
