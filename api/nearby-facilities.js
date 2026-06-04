@@ -487,7 +487,14 @@ export default async function handler(req, res) {
       language,
       region,
       requestHash,
-      cacheKey
+      cacheKey,
+      nearby,
+      quota: {
+        todayRemaining: nearby.todayRemaining,
+        monthRemaining: nearby.monthRemaining,
+        googleTodayRemaining: nearby.googleTodayRemaining,
+        googleMonthRemaining: nearby.googleMonthRemaining
+      }
     });
 
     return fail(
