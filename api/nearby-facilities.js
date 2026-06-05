@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
-const RUNTIME_VERSION = "nearby-facilities-v1.8.3-address-validation-codepoint";
+const RUNTIME_VERSION = "nearby-facilities-v1.8.4-google-quota-preflight";
 const SOURCE = "nearby-facilities-api";
 
 function setCors(res) {
@@ -238,6 +238,10 @@ function getRequestedCategories(body, nearby) {
   if (rawCategories.length === 0) return allowedCategories;
 
   return [...new Set(rawCategories.map((category) => safeString(category)).filter(Boolean))];
+}
+
+function estimateGoogleApiCalls(categories) {
+  return 1 + categories.length;
 }
 
 function buildRequestHash({ storeId, normalizedAddress, radius, categories, language, region }) {
@@ -551,8 +555,7 @@ export default async function handler(req, res) {
             cacheHit: false,
             googleApiCalled: false,
             dataSource: "invalid_address"
-          },
-          addressValidation
+          }
         }
       );
     }
@@ -598,10 +601,27 @@ export default async function handler(req, res) {
       });
     }
 
-    if (nearby.googleTodayRemaining <= 0 || nearby.googleMonthRemaining <= 0) {
+    const estimatedGoogleApiCalls = estimateGoogleApiCalls(categories);
+
+    if (
+      nearby.googleTodayRemaining < estimatedGoogleApiCalls ||
+      nearby.googleMonthRemaining < estimatedGoogleApiCalls
+    ) {
       return fail("GOOGLE_QUOTA_EXCEEDED", "Store Google API quota has been exhausted.", {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
+        source: {
+          cacheHit: false,
+          googleApiCalled: false,
+          dataSource: "quota_preflight_blocked"
+        },
+        quota: {
+          todayRemaining: nearby.todayRemaining,
+          monthRemaining: nearby.monthRemaining,
+          googleTodayRemaining: nearby.googleTodayRemaining,
+          googleMonthRemaining: nearby.googleMonthRemaining,
+          estimatedGoogleApiCalls
+        },
         nearby
       });
     }
@@ -647,7 +667,8 @@ export default async function handler(req, res) {
           todayRemaining: nearby.todayRemaining,
           monthRemaining: nearby.monthRemaining,
           googleTodayRemaining: nearby.googleTodayRemaining,
-          googleMonthRemaining: nearby.googleMonthRemaining
+          googleMonthRemaining: nearby.googleMonthRemaining,
+          estimatedGoogleApiCalls
         },
         nearby,
         facilities: buildCacheFacilities(cacheHit),
@@ -669,7 +690,8 @@ export default async function handler(req, res) {
         todayRemaining: nearby.todayRemaining,
         monthRemaining: nearby.monthRemaining,
         googleTodayRemaining: nearby.googleTodayRemaining,
-        googleMonthRemaining: nearby.googleMonthRemaining
+        googleMonthRemaining: nearby.googleMonthRemaining,
+        estimatedGoogleApiCalls
       }
     });
 
@@ -721,7 +743,8 @@ export default async function handler(req, res) {
           todayRemaining: nearby.todayRemaining,
           monthRemaining: nearby.monthRemaining,
           googleTodayRemaining: nearby.googleTodayRemaining,
-          googleMonthRemaining: nearby.googleMonthRemaining
+          googleMonthRemaining: nearby.googleMonthRemaining,
+          estimatedGoogleApiCalls
         },
         nearby,
         facilities: providerResult.facilities || {},
@@ -759,7 +782,8 @@ export default async function handler(req, res) {
           todayRemaining: nearby.todayRemaining,
           monthRemaining: nearby.monthRemaining,
           googleTodayRemaining: nearby.googleTodayRemaining,
-          googleMonthRemaining: nearby.googleMonthRemaining
+          googleMonthRemaining: nearby.googleMonthRemaining,
+          estimatedGoogleApiCalls
         },
         nearby,
         facilities: providerResult.facilities || {},
