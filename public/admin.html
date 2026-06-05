@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>周邊機能 Admin Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1b2029;
+      --panel-soft: #232936;
+      --text: #f3f5f8;
+      --muted: #a9b1bd;
+      --line: #343b49;
+      --accent: #4cc38a;
+      --warning: #f5c451;
+      --danger: #ff7373;
+      --disabled: #727b89;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #151922;
+    }
+
+    .shell {
+      width: min(1280px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 360px) auto auto 1fr;
+      gap: 10px;
+      align-items: center;
+      margin-top: 18px;
+    }
+
+    input {
+      min-width: 0;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0f1218;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    button {
+      height: 40px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 14px;
+      color: #07120d;
+      background: var(--accent);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    main.shell {
+      display: grid;
+      gap: 18px;
+    }
+
+    .status {
+      min-height: 22px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .status.error {
+      color: var(--danger);
+    }
+
+    .status.ok {
+      color: var(--accent);
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #151922;
+      padding: 12px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1420px;
+      border-collapse: collapse;
+      background: #151922;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #202633;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    tr.enabled {
+      background: rgba(76, 195, 138, .07);
+    }
+
+    tr.disabled {
+      color: var(--disabled);
+      background: rgba(114, 123, 137, .08);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pill.enabled {
+      color: var(--accent);
+      border-color: rgba(76, 195, 138, .55);
+      background: rgba(76, 195, 138, .12);
+    }
+
+    .pill.disabled {
+      color: var(--disabled);
+      background: rgba(114, 123, 137, .12);
+    }
+
+    .flag {
+      display: block;
+      margin-top: 6px;
+      color: var(--warning);
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: normal;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 22px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 560px) {
+      .shell {
+        width: min(100% - 20px, 1280px);
+        padding: 18px 0;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <h1>周邊機能 Admin Dashboard</h1>
+      <div class="toolbar" aria-label="Admin token controls">
+        <input id="adminToken" type="password" autocomplete="current-password" placeholder="輸入 Admin token">
+        <button id="loadButton" type="button">登入 / 查詢</button>
+        <button id="clearButton" class="secondary" type="button">清除 token</button>
+        <div id="status" class="status">尚未查詢</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="panel" aria-labelledby="summaryTitle">
+      <h2 id="summaryTitle">系統總覽</h2>
+      <div id="summary" class="summary"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="storesTitle">
+      <h2 id="storesTitle">店家使用狀態</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>storeId</th>
+              <th>storeName</th>
+              <th>nearbyEnabled</th>
+              <th>status</th>
+              <th>dailyQuota</th>
+              <th>monthlyQuota</th>
+              <th>todayUsed</th>
+              <th>monthUsed</th>
+              <th>todayRemaining</th>
+              <th>monthRemaining</th>
+              <th>googleDailyQuota</th>
+              <th>googleMonthlyQuota</th>
+              <th>googleTodayUsed</th>
+              <th>googleMonthUsed</th>
+              <th>googleTodayRemaining</th>
+              <th>googleMonthRemaining</th>
+              <th>defaultRadius</th>
+              <th>allowedRadii</th>
+              <th>allowedCategories</th>
+            </tr>
+          </thead>
+          <tbody id="storeRows">
+            <tr>
+              <td class="empty" colspan="19">登入後顯示店家資料</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const TOKEN_STORAGE_KEY = "nearbyAdminToken";
+    const ESTIMATED_FULL_QUERY_GOOGLE_CALLS = 6;
+
+    const tokenInput = document.getElementById("adminToken");
+    const loadButton = document.getElementById("loadButton");
+    const clearButton = document.getElementById("clearButton");
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const storeRowsEl = document.getElementById("storeRows");
+
+    tokenInput.value = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
+    renderSummary({});
+
+    function setStatus(message, type) {
+      statusEl.textContent = message;
+      statusEl.className = `status ${type || ""}`.trim();
+    }
+
+    function asNumber(value) {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    }
+
+    function formatList(value) {
+      return Array.isArray(value) ? value.join(", ") : "";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function renderSummary(summary) {
+      const metrics = [
+        ["totalStores", "店家總數"],
+        ["enabledStores", "啟用店家"],
+        ["disabledStores", "停用店家"],
+        ["totalTodayUsed", "今日查詢"],
+        ["totalMonthUsed", "本月查詢"],
+        ["totalGoogleTodayUsed", "今日 Google"],
+        ["totalGoogleMonthUsed", "本月 Google"]
+      ];
+
+      summaryEl.innerHTML = metrics
+        .map(([key, label]) => `
+          <div class="metric">
+            <span>${label}</span>
+            <strong>${escapeHtml(asNumber(summary[key]))}</strong>
+          </div>
+        `)
+        .join("");
+    }
+
+    function renderStores(stores) {
+      if (!Array.isArray(stores) || stores.length === 0) {
+        storeRowsEl.innerHTML = '<tr><td class="empty" colspan="19">目前沒有店家資料</td></tr>';
+        return;
+      }
+
+      storeRowsEl.innerHTML = stores.map((store) => {
+        const enabled = Boolean(store.nearbyEnabled);
+        const todayRemaining = asNumber(store.todayRemaining);
+        const googleTodayRemaining = asNumber(store.googleTodayRemaining);
+        const queryLimitFlag = todayRemaining === 0
+          ? '<span class="flag">今日查詢額度已用完</span>'
+          : "";
+        const googleLimitFlag = googleTodayRemaining < ESTIMATED_FULL_QUERY_GOOGLE_CALLS
+          ? '<span class="flag">Google 今日額度不足一次完整查詢</span>'
+          : "";
+
+        return `
+          <tr class="${enabled ? "enabled" : "disabled"}">
+            <td>${escapeHtml(store.storeId)}</td>
+            <td>${escapeHtml(store.storeName)}</td>
+            <td><span class="pill ${enabled ? "enabled" : "disabled"}">${enabled ? "true" : "false"}</span></td>
+            <td>${escapeHtml(store.status)}</td>
+            <td>${escapeHtml(store.dailyQuota)}</td>
+            <td>${escapeHtml(store.monthlyQuota)}</td>
+            <td>${escapeHtml(store.todayUsed)}</td>
+            <td>${escapeHtml(store.monthUsed)}</td>
+            <td>${escapeHtml(store.todayRemaining)}${queryLimitFlag}</td>
+            <td>${escapeHtml(store.monthRemaining)}</td>
+            <td>${escapeHtml(store.googleDailyQuota)}</td>
+            <td>${escapeHtml(store.googleMonthlyQuota)}</td>
+            <td>${escapeHtml(store.googleTodayUsed)}</td>
+            <td>${escapeHtml(store.googleMonthUsed)}</td>
+            <td>${escapeHtml(store.googleTodayRemaining)}${googleLimitFlag}</td>
+            <td>${escapeHtml(store.googleMonthRemaining)}</td>
+            <td>${escapeHtml(store.defaultRadius)}</td>
+            <td>${escapeHtml(formatList(store.allowedRadii))}</td>
+            <td>${escapeHtml(formatList(store.allowedCategories))}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadDashboard() {
+      const token = tokenInput.value.trim();
+
+      if (!token) {
+        setStatus("請輸入 Admin token", "error");
+        return;
+      }
+
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      loadButton.disabled = true;
+      setStatus("查詢中...", "");
+
+      try {
+        const response = await fetch("/api/admin-usage-status", {
+          method: "GET",
+          headers: {
+            "x-admin-token": token
+          }
+        });
+        const data = await response.json();
+
+        if (!data.success) {
+          setStatus(`${data.reason || "ERROR"}：${data.message || "查詢失敗"}`, "error");
+          return;
+        }
+
+        renderSummary(data.summary || {});
+        renderStores(data.stores || []);
+        setStatus(`查詢成功，runtimeVersion：${data.runtimeVersion || ""}`, "ok");
+      } catch (error) {
+        setStatus("查詢失敗，請確認 API 或網路狀態", "error");
+      } finally {
+        loadButton.disabled = false;
+      }
+    }
+
+    loadButton.addEventListener("click", loadDashboard);
+    tokenInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") loadDashboard();
+    });
+    clearButton.addEventListener("click", () => {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      tokenInput.value = "";
+      setStatus("已清除 token", "");
+    });
+  </script>
+</body>
+</html>
