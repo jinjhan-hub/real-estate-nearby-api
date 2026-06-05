@@ -87,6 +87,24 @@ async function supabaseSelect(config, table, query) {
   return response.json();
 }
 
+async function supabaseInsert(config, table, payload) {
+  const response = await fetch(`${config.url}/rest/v1/${table}`, {
+    method: "POST",
+    headers: {
+      apikey: config.serviceRoleKey,
+      Authorization: `Bearer ${config.serviceRoleKey}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Prefer: "return=minimal"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase ${table} insert failed: ${response.status}`);
+  }
+}
+
 async function fetchSingleByStoreId(config, table, storeId, select) {
   const params = new URLSearchParams({
     store_id: `eq.${storeId}`,
@@ -232,6 +250,91 @@ function buildCacheSummary(cacheRow) {
   const result = cacheRow?.result_json;
   if (!result || typeof result !== "object" || Array.isArray(result)) return [];
   return Array.isArray(result.summary) ? result.summary : [];
+}
+
+function countFacilities(facilities) {
+  if (!facilities || typeof facilities !== "object" || Array.isArray(facilities)) return 0;
+
+  return Object.values(facilities).reduce((total, places) => {
+    return total + (Array.isArray(places) ? places.length : 0);
+  }, 0);
+}
+
+function getUsageStatus(providerResult) {
+  return providerResult.success === true ? "success" : "failed";
+}
+
+function getGoogleApiLogStatus(call) {
+  const status = safeString(call?.status);
+  const allowed = ["success", "failed", "timeout", "rate_limited"];
+
+  return allowed.includes(status) ? status : "failed";
+}
+
+function buildGoogleApiLogNote(providerResult) {
+  const stage = safeString(providerResult.googleErrorStage);
+  const status = safeString(providerResult.googleErrorStatus);
+  const code = safeString(providerResult.googleErrorCode);
+  const parts = [stage, status, code].filter(Boolean);
+
+  return parts.length > 0 ? parts.join(":") : null;
+}
+
+async function writeGoogleUsageLogs({
+  config,
+  requestId,
+  storeId,
+  address,
+  radius,
+  categories,
+  requestHash,
+  cacheKey,
+  providerResult
+}) {
+  if (providerResult.googleApiCalled !== true) return;
+
+  const usageStatus = getUsageStatus(providerResult);
+  const facilityCountTotal = countFacilities(providerResult.facilities);
+
+  await supabaseInsert(config, "nearby_usage_logs", {
+    store_id: storeId,
+    request_id: requestId,
+    query_address_masked: maskAddress(address),
+    radius,
+    categories,
+    result_source: providerResult.success === true ? "google" : "error",
+    cache_hit: false,
+    cache_key: cacheKey,
+    request_hash: requestHash,
+    api_called: true,
+    api_name: "google_places",
+    estimated_cost_tier: "unknown",
+    facility_count_total: facilityCountTotal,
+    status: usageStatus,
+    error_code: providerResult.success === true ? null : providerResult.reason
+  });
+
+  const googleApiCalls = Array.isArray(providerResult.googleApiCalls)
+    ? providerResult.googleApiCalls
+    : [];
+  const note = buildGoogleApiLogNote(providerResult);
+
+  for (const call of googleApiCalls) {
+    await supabaseInsert(config, "nearby_google_api_usage_logs", {
+      store_id: storeId,
+      request_id: requestId,
+      google_api: safeString(call.googleApi),
+      category: safeString(call.category) || null,
+      radius,
+      cache_key: cacheKey,
+      request_hash: requestHash,
+      api_called: true,
+      status: getGoogleApiLogStatus(call),
+      cost_unit: 1,
+      estimated_cost_tier: "unknown",
+      note
+    });
+  }
 }
 
 export default async function handler(req, res) {
@@ -525,6 +628,20 @@ export default async function handler(req, res) {
         googleMonthRemaining: nearby.googleMonthRemaining
       }
     });
+
+    if (providerResult.googleApiCalled === true) {
+      await writeGoogleUsageLogs({
+        config,
+        requestId,
+        storeId: safeString(store.store_id),
+        address,
+        radius,
+        categories,
+        requestHash,
+        cacheKey,
+        providerResult
+      });
+    }
 
     if (providerResult.success === true) {
       return res.status(200).json({
