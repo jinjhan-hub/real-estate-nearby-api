@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
-const RUNTIME_VERSION = "nearby-facilities-v1.8.4-google-quota-preflight";
+const RUNTIME_VERSION = "nearby-facilities-v1.9-cache-write-hit";
 const SOURCE = "nearby-facilities-api";
 
 function setCors(res) {
@@ -102,6 +102,25 @@ async function supabaseInsert(config, table, payload) {
 
   if (!response.ok) {
     throw new Error(`Supabase ${table} insert failed: ${response.status}`);
+  }
+}
+
+async function supabaseUpsert(config, table, payload, onConflict) {
+  const query = onConflict ? `?on_conflict=${encodeURIComponent(onConflict)}` : "";
+  const response = await fetch(`${config.url}/rest/v1/${table}${query}`, {
+    method: "POST",
+    headers: {
+      apikey: config.serviceRoleKey,
+      Authorization: `Bearer ${config.serviceRoleKey}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase ${table} upsert failed: ${response.status}`);
   }
 }
 
@@ -297,12 +316,58 @@ function buildCacheSummary(cacheRow) {
   return Array.isArray(result.summary) ? result.summary : [];
 }
 
+function buildCacheExpiresAt() {
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30);
+  return expiresAt.toISOString();
+}
+
 function countFacilities(facilities) {
   if (!facilities || typeof facilities !== "object" || Array.isArray(facilities)) return 0;
 
   return Object.values(facilities).reduce((total, places) => {
     return total + (Array.isArray(places) ? places.length : 0);
   }, 0);
+}
+
+async function writeNearbyCache({
+  config,
+  address,
+  radius,
+  categories,
+  language,
+  region,
+  requestHash,
+  cacheKey,
+  providerResult
+}) {
+  if (providerResult.success !== true) return;
+
+  await supabaseUpsert(
+    config,
+    "nearby_cache",
+    {
+      cache_key: cacheKey,
+      query_address_normalized: address,
+      radius,
+      category: categories[0],
+      result_json: {
+        facilities: providerResult.facilities || {},
+        summary: Array.isArray(providerResult.summary) ? providerResult.summary : [],
+        query: {
+          radius,
+          categories,
+          language,
+          region
+        }
+      },
+      result_count: countFacilities(providerResult.facilities),
+      source: "google_places",
+      request_hash: requestHash,
+      expires_at: buildCacheExpiresAt()
+    },
+    "cache_key"
+  );
 }
 
 function getUsageStatus(providerResult) {
@@ -601,33 +666,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const estimatedGoogleApiCalls = estimateGoogleApiCalls(categories);
-
-    if (
-      nearby.googleTodayRemaining < estimatedGoogleApiCalls ||
-      nearby.googleMonthRemaining < estimatedGoogleApiCalls
-    ) {
-      return fail("GOOGLE_QUOTA_EXCEEDED", "Store Google API quota has been exhausted.", {
-        storeId: safeString(store.store_id),
-        storeName: safeString(store.store_name),
-        source: {
-          cacheHit: false,
-          googleApiCalled: false,
-          dataSource: "quota_preflight_blocked"
-        },
-        quota: {
-          todayRemaining: nearby.todayRemaining,
-          monthRemaining: nearby.monthRemaining,
-          googleTodayRemaining: nearby.googleTodayRemaining,
-          googleMonthRemaining: nearby.googleMonthRemaining,
-          estimatedGoogleApiCalls
-        },
-        nearby
-      });
-    }
-
     const language = safeString(body.language) || "zh-TW";
     const region = safeString(body.region) || "TW";
+    const estimatedGoogleApiCalls = estimateGoogleApiCalls(categories);
     const requestHash = buildRequestHash({
       storeId: safeString(store.store_id),
       normalizedAddress: address,
@@ -642,8 +683,8 @@ export default async function handler(req, res) {
     if (cacheHit) {
       return res.status(200).json({
         success: true,
-        reason: "CACHE_HIT",
-        message: "Nearby facility cache was found.",
+        reason: "OK",
+        message: "Nearby facilities fetched from cache.",
         apiSource: SOURCE,
         runtimeVersion: RUNTIME_VERSION,
         requestId,
@@ -676,6 +717,29 @@ export default async function handler(req, res) {
       });
     }
 
+    if (
+      nearby.googleTodayRemaining < estimatedGoogleApiCalls ||
+      nearby.googleMonthRemaining < estimatedGoogleApiCalls
+    ) {
+      return fail("GOOGLE_QUOTA_EXCEEDED", "Store Google API quota has been exhausted.", {
+        storeId: safeString(store.store_id),
+        storeName: safeString(store.store_name),
+        source: {
+          cacheHit: false,
+          googleApiCalled: false,
+          dataSource: "quota_preflight_blocked"
+        },
+        quota: {
+          todayRemaining: nearby.todayRemaining,
+          monthRemaining: nearby.monthRemaining,
+          googleTodayRemaining: nearby.googleTodayRemaining,
+          googleMonthRemaining: nearby.googleMonthRemaining,
+          estimatedGoogleApiCalls
+        },
+        nearby
+      });
+    }
+
     const providerResult = await lookupGoogleNearbyFacilities({
       storeId: safeString(store.store_id),
       address,
@@ -694,6 +758,20 @@ export default async function handler(req, res) {
         estimatedGoogleApiCalls
       }
     });
+
+    if (providerResult.success === true) {
+      await writeNearbyCache({
+        config,
+        address,
+        radius,
+        categories,
+        language,
+        region,
+        requestHash,
+        cacheKey,
+        providerResult
+      });
+    }
 
     if (providerResult.googleApiCalled === true) {
       await writeGoogleUsageLogs({
