@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
-const RUNTIME_VERSION = "nearby-facilities-v1.8.2-address-validation-debug";
+const RUNTIME_VERSION = "nearby-facilities-v1.8.3-address-validation-codepoint";
 const SOURCE = "nearby-facilities-api";
 
 function setCors(res) {
@@ -173,20 +173,41 @@ function normalizeAddress(address) {
   return safeString(address).replace(/\s+/g, " ");
 }
 
+const CP_COUNTY = 0x7e23;
+const CP_CITY = 0x5e02;
+const CP_TOWNSHIP = 0x9109;
+const CP_TOWN = 0x93ae;
+const CP_DISTRICT = 0x5340;
+const CP_ROAD = 0x8def;
+const CP_STREET = 0x8857;
+const CP_LANE = 0x5df7;
+const CP_ALLEY = 0x5f04;
+const CP_NUMBER = 0x865f;
+
+function countCharCode(value, codePoint) {
+  return Array.from(value).filter((char) => char.codePointAt(0) === codePoint).length;
+}
+
+function hasCharCode(value, codePoint) {
+  return countCharCode(value, codePoint) > 0;
+}
+
 function getStreetAddressValidation(address) {
   const value = safeString(address);
 
-  const countyMarker = "\u7e23";
-  const cityMarker = "\u5e02";
-  const localMarkers = ["\u9109", "\u93ae", "\u5e02", "\u5340"];
-  const roadMarkers = ["\u8def", "\u8857", "\u5927\u9053", "\u5df7", "\u5f04"];
-
   const hasCountyLevel =
-    value.includes(countyMarker) ||
-    (value.includes(cityMarker) && value.indexOf(cityMarker) !== value.lastIndexOf(cityMarker));
-  const hasLocalityLevel = localMarkers.some((marker) => value.includes(marker));
-  const hasRoadLevel = roadMarkers.some((marker) => value.includes(marker));
-  const hasHouseNumber = /\d+(?:-\d+)?\u865f/.test(value);
+    hasCharCode(value, CP_COUNTY) || countCharCode(value, CP_CITY) >= 2;
+  const hasLocalityLevel =
+    hasCharCode(value, CP_TOWNSHIP) ||
+    hasCharCode(value, CP_TOWN) ||
+    hasCharCode(value, CP_DISTRICT) ||
+    hasCharCode(value, CP_CITY);
+  const hasRoadLevel =
+    hasCharCode(value, CP_ROAD) ||
+    hasCharCode(value, CP_STREET) ||
+    hasCharCode(value, CP_LANE) ||
+    hasCharCode(value, CP_ALLEY);
+  const hasHouseNumber = /\d+(?:-\d+)?/.test(value) && hasCharCode(value, CP_NUMBER);
   const passed = Boolean(
     value && hasCountyLevel && hasLocalityLevel && hasRoadLevel && hasHouseNumber
   );
