@@ -3,6 +3,13 @@ import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
 const RUNTIME_VERSION = "nearby-facilities-v1.9-cache-write-hit";
 const SOURCE = "nearby-facilities-api";
+const CACHE_WRITABLE_CATEGORIES = new Set([
+  "park",
+  "school",
+  "shopping",
+  "transport",
+  "medical"
+]);
 
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -201,6 +208,8 @@ const CP_ROAD = 0x8def;
 const CP_STREET = 0x8857;
 const CP_LANE = 0x5df7;
 const CP_ALLEY = 0x5f04;
+const CP_BIG = 0x5927;
+const CP_WAY = 0x9053;
 const CP_NUMBER = 0x865f;
 
 function countCharCode(value, codePoint) {
@@ -211,21 +220,36 @@ function hasCharCode(value, codePoint) {
   return countCharCode(value, codePoint) > 0;
 }
 
+function hasCharCodeSequence(value, codePoints) {
+  const chars = Array.from(value);
+
+  return chars.some((char, index) => {
+    return codePoints.every((codePoint, offset) => {
+      return chars[index + offset]?.codePointAt(0) === codePoint;
+    });
+  });
+}
+
 function getStreetAddressValidation(address) {
   const value = safeString(address);
+  const hasCounty = hasCharCode(value, CP_COUNTY);
+  const cityCount = countCharCode(value, CP_CITY);
+  const hasCity = cityCount > 0;
+  const hasDistrict = hasCharCode(value, CP_DISTRICT);
 
   const hasCountyLevel =
-    hasCharCode(value, CP_COUNTY) || countCharCode(value, CP_CITY) >= 2;
+    hasCounty || cityCount >= 2 || (hasCity && hasDistrict);
   const hasLocalityLevel =
     hasCharCode(value, CP_TOWNSHIP) ||
     hasCharCode(value, CP_TOWN) ||
-    hasCharCode(value, CP_DISTRICT) ||
-    hasCharCode(value, CP_CITY);
+    hasDistrict ||
+    (hasCounty && hasCity);
   const hasRoadLevel =
     hasCharCode(value, CP_ROAD) ||
     hasCharCode(value, CP_STREET) ||
     hasCharCode(value, CP_LANE) ||
-    hasCharCode(value, CP_ALLEY);
+    hasCharCode(value, CP_ALLEY) ||
+    hasCharCodeSequence(value, [CP_BIG, CP_WAY]);
   const hasHouseNumber = /\d+(?:-\d+)?/.test(value) && hasCharCode(value, CP_NUMBER);
   const passed = Boolean(
     value && hasCountyLevel && hasLocalityLevel && hasRoadLevel && hasHouseNumber
@@ -259,8 +283,92 @@ function getRequestedCategories(body, nearby) {
   return [...new Set(rawCategories.map((category) => safeString(category)).filter(Boolean))];
 }
 
-function estimateGoogleApiCalls(categories) {
-  return 1 + categories.length;
+function hasProvidedValue(value) {
+  return value !== undefined && value !== null && safeString(value) !== "";
+}
+
+function parseCoordinate(value) {
+  if (!hasProvidedValue(value)) return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : NaN;
+}
+
+function getLocationInput(body) {
+  const hasLat = hasProvidedValue(body.lat);
+  const hasLng = hasProvidedValue(body.lng);
+
+  if (hasLat !== hasLng) {
+    return {
+      ok: false,
+      reason: "MISSING_LOCATION",
+      message: "請提供完整地址，或提供經緯度 lat/lng。"
+    };
+  }
+
+  if (hasLat && hasLng) {
+    const lat = parseCoordinate(body.lat);
+    const lng = parseCoordinate(body.lng);
+
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
+    ) {
+      return {
+        ok: false,
+        reason: "INVALID_COORDINATES",
+        message: "Invalid coordinates."
+      };
+    }
+
+    const coordinateKey = `coordinates:${lat.toFixed(7)},${lng.toFixed(7)}`;
+
+    return {
+      ok: true,
+      inputType: "coordinates",
+      address: null,
+      lat,
+      lng,
+      queryAddressNormalized: coordinateKey,
+      queryAddressMasked: coordinateKey
+    };
+  }
+
+  const address = normalizeAddress(body.address);
+
+  if (!address) {
+    return {
+      ok: false,
+      reason: "MISSING_LOCATION",
+      message: "請提供完整地址，或提供經緯度 lat/lng。"
+    };
+  }
+
+  return {
+    ok: true,
+    inputType: "address",
+    address,
+    lat: null,
+    lng: null,
+    queryAddressNormalized: `address:${address}`,
+    queryAddressMasked: maskAddress(address)
+  };
+}
+
+function buildLocationResponse(locationInput) {
+  return {
+    inputType: locationInput.inputType,
+    address: locationInput.address ? maskAddress(locationInput.address) : null,
+    lat: Number.isFinite(locationInput.lat) ? locationInput.lat : null,
+    lng: Number.isFinite(locationInput.lng) ? locationInput.lng : null
+  };
+}
+
+function estimateGoogleApiCalls(categories, locationInputType) {
+  return (locationInputType === "coordinates" ? 0 : 1) + categories.length;
 }
 
 function buildRequestHash({ storeId, normalizedAddress, radius, categories, language, region }) {
@@ -332,7 +440,7 @@ function countFacilities(facilities) {
 
 async function writeNearbyCache({
   config,
-  address,
+  locationInput,
   radius,
   categories,
   language,
@@ -342,19 +450,25 @@ async function writeNearbyCache({
   providerResult
 }) {
   if (providerResult.success !== true) return;
+  if (categories.some((category) => !CACHE_WRITABLE_CATEGORIES.has(category))) return;
+
+  const location = buildLocationResponse(locationInput);
 
   await supabaseUpsert(
     config,
     "nearby_cache",
     {
       cache_key: cacheKey,
-      query_address_normalized: address,
+      query_address_normalized: locationInput.queryAddressNormalized,
+      lat: location.lat,
+      lng: location.lng,
       radius,
       category: categories[0],
       result_json: {
         facilities: providerResult.facilities || {},
         summary: Array.isArray(providerResult.summary) ? providerResult.summary : [],
         query: {
+          location,
           radius,
           categories,
           language,
@@ -390,11 +504,26 @@ function buildGoogleApiLogNote(providerResult) {
   return parts.length > 0 ? parts.join(":") : null;
 }
 
+function getSafeErrorMessage(error) {
+  const message = safeString(error?.message);
+  if (!message) return null;
+
+  if (/accessCode|access_code|api[_-]?key|service[_-]?role|bearer|authorization/i.test(message)) {
+    return "Sensitive error redacted.";
+  }
+
+  if (/https?:\/\//i.test(message)) {
+    return "External request failed.";
+  }
+
+  return message.slice(0, 180);
+}
+
 async function writeGoogleUsageLogs({
   config,
   requestId,
   storeId,
-  address,
+  locationInput,
   radius,
   categories,
   requestHash,
@@ -409,7 +538,10 @@ async function writeGoogleUsageLogs({
   await supabaseInsert(config, "nearby_usage_logs", {
     store_id: storeId,
     request_id: requestId,
-    query_address_masked: maskAddress(address),
+    query_address_normalized: locationInput.queryAddressNormalized,
+    query_address_masked: locationInput.queryAddressMasked,
+    lat: Number.isFinite(locationInput.lat) ? locationInput.lat : null,
+    lng: Number.isFinite(locationInput.lng) ? locationInput.lng : null,
     radius,
     categories,
     result_source: providerResult.success === true ? "google" : "error",
@@ -474,12 +606,17 @@ export default async function handler(req, res) {
     return fail("METHOD_NOT_ALLOWED", "Only POST is allowed.");
   }
 
+  let debugStep = "validate_input";
+  let debugSubStep = "parse_body";
+
   try {
     const config = getSupabaseConfig();
 
     if (!config) {
       return fail("SUPABASE_CONFIG_MISSING", "Server configuration is missing.");
     }
+
+    debugSubStep = "parse_body";
 
     const body = getRequestBody(req);
     const storeId = normalizeStoreId(
@@ -503,6 +640,8 @@ export default async function handler(req, res) {
         storeId: storeId || null
       });
     }
+
+    debugStep = "load_store_settings";
 
     const store = await fetchSingleByStoreId(
       config,
@@ -584,6 +723,9 @@ export default async function handler(req, res) {
 
     const nearby = buildNearby(settings, quotaStatus);
 
+    debugStep = "validate_input";
+    debugSubStep = "normalize_location_input";
+
     if (!nearby.enabled) {
       return fail(
         "NEARBY_DISABLED",
@@ -596,19 +738,29 @@ export default async function handler(req, res) {
       );
     }
 
-    const address = normalizeAddress(body.address);
+    debugSubStep = "build_location_input";
 
-    if (!address) {
-      return fail("MISSING_ADDRESS", "Address is required.", {
+    const locationInput = getLocationInput(body);
+    const address = locationInput.address || "";
+
+    if (!locationInput.ok) {
+      return fail(locationInput.reason, locationInput.message, {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
-        nearby
+        nearby,
+        source: {
+          cacheHit: false,
+          googleApiCalled: false,
+          dataSource: "invalid_location"
+        }
       });
     }
 
-    const addressValidation = getStreetAddressValidation(address);
+    debugSubStep = locationInput.inputType === "coordinates"
+      ? "validate_coordinates"
+      : "validate_address";
 
-    if (!addressValidation.passed) {
+    if (locationInput.inputType === "address" && !isCompleteStreetAddress(address)) {
       return fail(
         "INCOMPLETE_ADDRESS",
         "請輸入包含門牌號碼的完整地址，例如：彰化縣員林市○○路○○號。",
@@ -616,6 +768,7 @@ export default async function handler(req, res) {
           storeId: safeString(store.store_id),
           storeName: safeString(store.store_name),
           nearby,
+          location: buildLocationResponse(locationInput),
           source: {
             cacheHit: false,
             googleApiCalled: false,
@@ -625,13 +778,16 @@ export default async function handler(req, res) {
       );
     }
 
-    if (address.length < 4) {
+    if (locationInput.inputType === "address" && address.length < 4) {
       return fail("INVALID_ADDRESS", "Address is too short.", {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
-        nearby
+        nearby,
+        location: buildLocationResponse(locationInput)
       });
     }
+
+    debugSubStep = "validate_radius";
 
     const radius = toNumber(body.radius, nearby.defaultRadius);
 
@@ -643,6 +799,8 @@ export default async function handler(req, res) {
         allowedRadii: nearby.allowedRadii
       });
     }
+
+    debugSubStep = "validate_categories";
 
     const categories = getRequestedCategories(body, nearby);
     const invalidCategories = categories.filter(
@@ -658,6 +816,9 @@ export default async function handler(req, res) {
       });
     }
 
+    debugStep = "check_quota";
+    debugSubStep = "check_query_quota";
+
     if (nearby.todayRemaining <= 0 || nearby.monthRemaining <= 0) {
       return fail("QUERY_QUOTA_EXCEEDED", "Store query quota has been exhausted.", {
         storeId: safeString(store.store_id),
@@ -668,19 +829,25 @@ export default async function handler(req, res) {
 
     const language = safeString(body.language) || "zh-TW";
     const region = safeString(body.region) || "TW";
-    const estimatedGoogleApiCalls = estimateGoogleApiCalls(categories);
+    const estimatedGoogleApiCalls = estimateGoogleApiCalls(categories, locationInput.inputType);
     const requestHash = buildRequestHash({
       storeId: safeString(store.store_id),
-      normalizedAddress: address,
+      normalizedAddress: locationInput.queryAddressNormalized,
       radius,
       categories,
       language,
       region
     });
     const cacheKey = buildCacheKey(requestHash);
+
+    debugStep = "read_cache";
+    debugSubStep = "read_cache";
+
     const cacheHit = await fetchNearbyCache(config, requestHash, cacheKey);
 
     if (cacheHit) {
+      debugStep = "build_response";
+
       return res.status(200).json({
         success: true,
         reason: "OK",
@@ -690,8 +857,9 @@ export default async function handler(req, res) {
         requestId,
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
+        location: buildLocationResponse(locationInput),
         query: {
-          addressMasked: maskAddress(address),
+          addressMasked: locationInput.queryAddressMasked,
           radius,
           categories,
           language,
@@ -717,6 +885,9 @@ export default async function handler(req, res) {
       });
     }
 
+    debugStep = "check_quota";
+    debugSubStep = "check_google_quota";
+
     if (
       nearby.googleTodayRemaining < estimatedGoogleApiCalls ||
       nearby.googleMonthRemaining < estimatedGoogleApiCalls
@@ -724,6 +895,7 @@ export default async function handler(req, res) {
       return fail("GOOGLE_QUOTA_EXCEEDED", "Store Google API quota has been exhausted.", {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
+        location: buildLocationResponse(locationInput),
         source: {
           cacheHit: false,
           googleApiCalled: false,
@@ -740,9 +912,15 @@ export default async function handler(req, res) {
       });
     }
 
+    debugStep = "google_nearby_provider";
+    debugSubStep = "google_nearby_provider";
+
     const providerResult = await lookupGoogleNearbyFacilities({
       storeId: safeString(store.store_id),
       address,
+      lat: locationInput.lat,
+      lng: locationInput.lng,
+      locationInputType: locationInput.inputType,
       radius,
       categories,
       language,
@@ -760,9 +938,12 @@ export default async function handler(req, res) {
     });
 
     if (providerResult.success === true) {
+      debugStep = "write_cache";
+      debugSubStep = "write_cache";
+
       await writeNearbyCache({
         config,
-        address,
+        locationInput,
         radius,
         categories,
         language,
@@ -774,11 +955,14 @@ export default async function handler(req, res) {
     }
 
     if (providerResult.googleApiCalled === true) {
+      debugStep = "write_usage_logs";
+      debugSubStep = "write_usage_logs";
+
       await writeGoogleUsageLogs({
         config,
         requestId,
         storeId: safeString(store.store_id),
-        address,
+        locationInput,
         radius,
         categories,
         requestHash,
@@ -786,6 +970,9 @@ export default async function handler(req, res) {
         providerResult
       });
     }
+
+    debugStep = "build_response";
+    debugSubStep = "build_response";
 
     if (providerResult.success === true) {
       return res.status(200).json({
@@ -797,8 +984,9 @@ export default async function handler(req, res) {
         requestId,
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
+        location: buildLocationResponse(locationInput),
         query: {
-          addressMasked: maskAddress(address),
+          addressMasked: locationInput.queryAddressMasked,
           radius,
           categories,
           language,
@@ -836,8 +1024,9 @@ export default async function handler(req, res) {
       {
         storeId: safeString(store.store_id),
         storeName: safeString(store.store_name),
+        location: buildLocationResponse(locationInput),
         query: {
-          addressMasked: maskAddress(address),
+          addressMasked: locationInput.queryAddressMasked,
           radius,
           categories,
           language,
@@ -869,6 +1058,19 @@ export default async function handler(req, res) {
       }
     );
   } catch (error) {
-    return fail("SERVER_ERROR", "Nearby facility request failed.");
+    console.error("nearby-facilities SERVER_ERROR", {
+      requestId,
+      debugStep,
+      debugSubStep,
+      errorName: error?.name || null,
+      errorMessage: getSafeErrorMessage(error)
+    });
+
+    return fail("SERVER_ERROR", "Nearby facility request failed.", {
+      debugStep,
+      debugSubStep,
+      errorName: error?.name || null,
+      safeErrorMessage: getSafeErrorMessage(error)
+    });
   }
 }
