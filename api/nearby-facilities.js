@@ -176,13 +176,21 @@ function normalizeAddress(address) {
 function isCompleteStreetAddress(address) {
   const value = safeString(address);
 
-  return (
-    value &&
-    /[縣市]/.test(value) &&
-    /[鄉鎮市區]/.test(value) &&
-    /[路街段巷弄]/.test(value) &&
-    value.includes("號")
-  );
+  if (!value) return false;
+
+  const countyMarker = "\u7e23";
+  const cityMarker = "\u5e02";
+  const localMarkers = ["\u9109", "\u93ae", "\u5e02", "\u5340"];
+  const roadMarkers = ["\u8def", "\u8857", "\u5927\u9053", "\u5df7", "\u5f04"];
+
+  const hasCountyOrCity =
+    value.includes(countyMarker) ||
+    (value.includes(cityMarker) && value.indexOf(cityMarker) !== value.lastIndexOf(cityMarker));
+  const hasLocalArea = localMarkers.some((marker) => value.includes(marker));
+  const hasRoad = roadMarkers.some((marker) => value.includes(marker));
+  const hasHouseNumber = /\d+(?:-\d+)?\u865f/.test(value);
+
+  return hasCountyOrCity && hasLocalArea && hasRoad && hasHouseNumber;
 }
 
 function getRequestBody(req) {
