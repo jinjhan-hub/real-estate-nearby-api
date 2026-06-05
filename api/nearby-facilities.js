@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { lookupGoogleNearbyFacilities } from "../lib/googleNearbyProvider.js";
 
-const RUNTIME_VERSION = "nearby-facilities-v1.4.3-cache-lookup-skeleton";
+const RUNTIME_VERSION = "nearby-facilities-v1.8.2-address-validation-debug";
 const SOURCE = "nearby-facilities-api";
 
 function setCors(res) {
@@ -173,24 +173,36 @@ function normalizeAddress(address) {
   return safeString(address).replace(/\s+/g, " ");
 }
 
-function isCompleteStreetAddress(address) {
+function getStreetAddressValidation(address) {
   const value = safeString(address);
-
-  if (!value) return false;
 
   const countyMarker = "\u7e23";
   const cityMarker = "\u5e02";
   const localMarkers = ["\u9109", "\u93ae", "\u5e02", "\u5340"];
   const roadMarkers = ["\u8def", "\u8857", "\u5927\u9053", "\u5df7", "\u5f04"];
 
-  const hasCountyOrCity =
+  const hasCountyLevel =
     value.includes(countyMarker) ||
     (value.includes(cityMarker) && value.indexOf(cityMarker) !== value.lastIndexOf(cityMarker));
-  const hasLocalArea = localMarkers.some((marker) => value.includes(marker));
-  const hasRoad = roadMarkers.some((marker) => value.includes(marker));
+  const hasLocalityLevel = localMarkers.some((marker) => value.includes(marker));
+  const hasRoadLevel = roadMarkers.some((marker) => value.includes(marker));
   const hasHouseNumber = /\d+(?:-\d+)?\u865f/.test(value);
+  const passed = Boolean(
+    value && hasCountyLevel && hasLocalityLevel && hasRoadLevel && hasHouseNumber
+  );
 
-  return hasCountyOrCity && hasLocalArea && hasRoad && hasHouseNumber;
+  return {
+    normalizedLength: value.length,
+    hasCountyLevel,
+    hasLocalityLevel,
+    hasRoadLevel,
+    hasHouseNumber,
+    passed
+  };
+}
+
+function isCompleteStreetAddress(address) {
+  return getStreetAddressValidation(address).passed;
 }
 
 function getRequestBody(req) {
@@ -504,7 +516,9 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!isCompleteStreetAddress(address)) {
+    const addressValidation = getStreetAddressValidation(address);
+
+    if (!addressValidation.passed) {
       return fail(
         "INCOMPLETE_ADDRESS",
         "請輸入包含門牌號碼的完整地址，例如：彰化縣員林市○○路○○號。",
@@ -516,7 +530,8 @@ export default async function handler(req, res) {
             cacheHit: false,
             googleApiCalled: false,
             dataSource: "invalid_address"
-          }
+          },
+          addressValidation
         }
       );
     }
