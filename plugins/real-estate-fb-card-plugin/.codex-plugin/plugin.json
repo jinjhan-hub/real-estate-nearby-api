@@ -1,0 +1,18 @@
+{
+  "name": "real-estate-fb-card-plugin",
+  "version": "1.0.0",
+  "description": "認證後建立合規 FB 4:5 房仲銷售圖卡。",
+  "author": { "name": "建穎", "url": "https://github.com/jinjhan-hub" },
+  "repository": "https://github.com/jinjhan-hub/real-estate-nearby-api",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "FB 銷售圖卡認證公版",
+    "shortDescription": "認證店家後製作合規的 FB 4:5 房仲圖卡",
+    "longDescription": "提供固定圖卡流程、七份分段規則與店家認證。店家資料由 Vercel MCP 安全查詢 Supabase，不會包進 Plugin。",
+    "developerName": "建穎",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["使用 FB 銷售圖卡認證公版，幫我製作一張 FB 4:5 房仲銷售圖卡。"]
+  }
+}
