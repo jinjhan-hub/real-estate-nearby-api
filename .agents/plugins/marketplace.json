@@ -1,0 +1,10 @@
+{
+  "name": "personal",
+  "interface": { "displayName": "Personal" },
+  "plugins": [{
+    "name": "real-estate-fb-card-plugin",
+    "source": { "source": "local", "path": "./plugins/real-estate-fb-card-plugin" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Productivity"
+  }]
+}
