@@ -52,7 +52,8 @@ export default async function handler(req, res) {
       return reply(res, id, {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result,
-        isError: !result.verified
+        // 認證失敗是可預期的業務結果，不可標記為 MCP 工具故障。
+        isError: false
       });
     }
     default:
