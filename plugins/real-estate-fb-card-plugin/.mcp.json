@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "real-estate-card-access": {
+      "type": "http",
+      "url": "https://real-estate-nearby-api.vercel.app/api/mcp"
+    }
+  }
+}
